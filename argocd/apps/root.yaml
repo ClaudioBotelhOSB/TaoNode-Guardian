@@ -1,0 +1,39 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: taonode-guardian-root
+    app.kubernetes.io/part-of: taonode-guardian
+  # Cascade-delete: removing root also removes all child Applications and
+  # their managed resources. Remove this finalizer if you need orphan-delete behavior.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  # ── Source: the directory that contains the child Application manifests ───
+  source:
+    repoURL: https://github.com/ClaudioBotelhOSB/taonode-guardian
+    targetRevision: HEAD
+    path: argocd/apps
+
+  # ── Destination: root lives in the argocd namespace (self-managing) ───────
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+
+  # ── Sync policy ───────────────────────────────────────────────────────────
+  # automated.prune   — removes resources that are no longer in Git
+  # automated.selfHeal — re-applies any manual drift automatically
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # Prevents Application objects (child apps) from being pruned while
+      # they still have managed resources. Safer for stateful workloads.
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true

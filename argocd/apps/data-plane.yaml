@@ -1,0 +1,58 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: data-plane
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: taonode-guardian-data-plane
+    app.kubernetes.io/part-of: taonode-guardian
+  annotations:
+    # sync-wave "3" — TaoNode CRs are applied only after the operator (wave 2)
+    # is running and the CRD is registered. ArgoCD verifies the control-plane
+    # Application is Healthy before advancing to this wave.
+    argocd.argoproj.io/sync-wave: "3"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  # ── Source: config/samples contains the TaoNode custom resources ──────────
+  # ArgoCD auto-detects the directory as plain YAML (no kustomization.yaml).
+  # To promote a node config from testnet to mainnet: copy and edit the CR
+  # in config/samples/ and commit — ArgoCD reconciles the change automatically.
+  source:
+    repoURL: https://github.com/ClaudioBotelhOSB/taonode-guardian
+    targetRevision: HEAD
+    path: config/samples
+
+  # ── Destination ───────────────────────────────────────────────────────────
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: taonode-guardian-system
+
+  # ── Sync policy ───────────────────────────────────────────────────────────
+  syncPolicy:
+    automated:
+      # prune: true removes TaoNode CRs that are deleted from Git.
+      # For production validators, set prune: false to prevent accidental node
+      # deletion if a file is unintentionally removed from the repository.
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+
+  # ── Ignore operator-managed status fields ─────────────────────────────────
+  # The TaoNode operator writes to .status and .metadata.finalizers continuously.
+  # Ignoring these prevents ArgoCD from marking the app as OutOfSync on every reconcile.
+  ignoreDifferences:
+    - group: tao.guardian.io
+      kind: TaoNode
+      jsonPointers:
+        - /status
+        - /metadata/finalizers

@@ -1,0 +1,67 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: control-plane
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: taonode-guardian-control-plane
+    app.kubernetes.io/part-of: taonode-guardian
+  annotations:
+    # sync-wave "2" — operator CRDs and RBAC must exist before TaoNode CRs (wave 3)
+    # are created by the data-plane app.
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  # ── Source: kustomize overlay at config/default ───────────────────────────
+  # config/default/kustomization.yaml aggregates:
+  #   - config/crd/bases/    (TaoNode CRD)
+  #   - config/rbac/         (ServiceAccount, ClusterRole, ClusterRoleBinding)
+  #   - config/manager/      (controller Deployment, image pinned via kustomize edit)
+  # The namespace field in config/default/kustomization.yaml sets the install namespace.
+  source:
+    repoURL: https://github.com/ClaudioBotelhOSB/taonode-guardian
+    targetRevision: HEAD
+    path: config/default
+
+  # ── Destination ───────────────────────────────────────────────────────────
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: taonode-guardian-system
+
+  # ── Sync policy ───────────────────────────────────────────────────────────
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # ServerSideApply avoids last-applied-configuration annotation size limit
+      # on large CRD manifests (>256 KB).
+      - ServerSideApply=true
+      - PruneLast=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 2m
+
+  # ── Ignore transient fields that always drift ─────────────────────────────
+  ignoreDifferences:
+    # CRD status is managed by the API server; ignore to prevent sync loops.
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+      jsonPointers:
+        - /status
+    # Webhook caBundle is injected by cert-manager; ArgoCD must not overwrite it.
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+      jsonPointers:
+        - /webhooks/0/clientConfig/caBundle
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+      jsonPointers:
+        - /webhooks/0/clientConfig/caBundle
