@@ -1,0 +1,167 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: taonode-guardian-controller-manager
+  namespace: taonode-guardian-system
+  labels:
+    app.kubernetes.io/name: taonode-guardian
+    app.kubernetes.io/component: controller-manager
+    control-plane: controller-manager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: taonode-guardian
+      control-plane: controller-manager
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: taonode-guardian
+        control-plane: controller-manager
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+    spec:
+      serviceAccountName: taonode-guardian-controller-manager
+      terminationGracePeriodSeconds: 30
+
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: manager
+          # Image is overridden by config/manager/kustomization.yaml.
+          # Local dev: docker build -t controller:latest .
+          image: controller:latest
+          imagePullPolicy: IfNotPresent
+
+          command:
+            - /manager
+          args:
+            - --leader-elect
+            # Disable webhooks in dev (no cert-manager). Flip to true in prod overlays.
+            - --enable-webhooks=false
+            - --metrics-bind-address=:8080
+            - --health-probe-bind-address=:8081
+            # Pod name injected via downward API below → stable cross-replica DR key prefix.
+            - --cluster-id=$(CLUSTER_ID)
+
+          ports:
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+            - name: health-probe
+              containerPort: 8081
+              protocol: TCP
+            # Only active when --enable-webhooks=true; cert-manager injects TLS.
+            - name: webhook-server
+              containerPort: 9443
+              protocol: TCP
+
+          env:
+            # ── Cluster identity (Downward API) ─────────────────────────────
+            # Pod name is stable within a StatefulSet; used as the DR backup key prefix.
+            - name: CLUSTER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+
+            # ── Analytics plane — ClickHouse ────────────────────────────────
+            # Feature-gated: the analytics BatchWriter + AnomalyDetector are only
+            # initialized when CLICKHOUSE_ENDPOINT is non-empty (see initAnalytics()).
+            # Create the Secret manually:
+            #   kubectl create secret generic taonode-guardian-clickhouse \
+            #     --from-literal=endpoint=clickhouse://ch-host:9000 \
+            #     --from-literal=username=default \
+            #     --from-literal=password='' \
+            #     --from-literal=database=taonode_guardian \
+            #     -n taonode-guardian-system
+            - name: CLICKHOUSE_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: taonode-guardian-clickhouse
+                  key: endpoint
+                  optional: true
+            - name: CLICKHOUSE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: taonode-guardian-clickhouse
+                  key: username
+                  optional: true
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: taonode-guardian-clickhouse
+                  key: password
+                  optional: true
+            - name: CLICKHOUSE_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: taonode-guardian-clickhouse
+                  key: database
+                  optional: true
+            - name: CLICKHOUSE_TLS
+              value: "false"
+
+            # ── AI advisor — Ollama ──────────────────────────────────────────
+            # Feature-gated: Advisor is nil when OLLAMA_URL is empty (see initAI()).
+            # Point to an Ollama sidecar or in-cluster Ollama Deployment.
+            - name: OLLAMA_URL
+              value: ""  # e.g. http://ollama.taonode-guardian-system.svc:11434
+            - name: OLLAMA_MODEL
+              value: "llama3.1:8b-instruct-q4_K_M"
+
+            # ── Default node image ────────────────────────────────────────────
+            - name: DEFAULT_NODE_IMAGE
+              value: "ghcr.io/opentensor/subtensor:latest"
+
+            # ── Disaster recovery ─────────────────────────────────────────────
+            - name: DR_INTERVAL
+              value: "1h"
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health-probe
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+            timeoutSeconds: 5
+
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health-probe
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 3
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+          volumeMounts:
+            # Webhook TLS certs injected by cert-manager Certificate resource.
+            # The volume is optional so the pod starts cleanly when webhooks are off.
+            - name: webhook-certs
+              mountPath: /tmp/k8s-webhook-server/serving-certs
+              readOnly: true
+
+      volumes:
+        - name: webhook-certs
+          secret:
+            secretName: taonode-guardian-webhook-server-cert
+            optional: true

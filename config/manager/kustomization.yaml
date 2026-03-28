@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- manager.yaml
+
+# Pin the controller image for a release.
+# CI overrides this with: kustomize edit set image controller=<registry>/<repo>:<sha>
+images:
+- name: controller
+  newName: ghcr.io/ClaudioBotelhOSB/taonode-guardian
+  newTag: latest

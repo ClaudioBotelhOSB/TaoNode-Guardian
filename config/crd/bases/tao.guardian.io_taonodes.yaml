@@ -1,0 +1,1046 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.1
+  name: taonodes.tao.guardian.io
+spec:
+  group: tao.guardian.io
+  names:
+    kind: TaoNode
+    listKind: TaoNodeList
+    plural: taonodes
+    shortNames:
+    - tn
+    singular: taonode
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.network
+      name: Network
+      type: string
+    - jsonPath: .spec.role
+      name: Role
+      type: string
+    - jsonPath: .spec.subnetID
+      name: Subnet
+      type: integer
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.syncState.state
+      name: Sync
+      type: string
+    - jsonPath: .status.syncState.currentBlock
+      name: Block
+      type: integer
+    - jsonPath: .status.syncState.blockLag
+      name: Lag
+      type: integer
+    - jsonPath: .status.chain.peerCount
+      name: Peers
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: TaoNode is the Schema for the taonodes API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: TaoNodeSpec defines the desired state of TaoNode.
+            properties:
+              aiAdvisor:
+                description: AIAdvisor configures the Ollama-backed AI incident analysis
+                  engine.
+                properties:
+                  contextWindowTokens:
+                    default: 4096
+                    description: ContextWindowTokens limits the token budget for the
+                      incident context JSON.
+                    format: int32
+                    type: integer
+                  enabled:
+                    default: false
+                    description: Enabled controls whether AI advisory is active.
+                    type: boolean
+                  endpoint:
+                    description: Endpoint is the Ollama API base URL (e.g., "http://ollama:11434").
+                    type: string
+                  minAnomalyScoreForAdvisory:
+                    default: "0.6"
+                    description: MinAnomalyScoreForAdvisory is the minimum anomaly
+                      score (0.0–1.0) that triggers AI analysis.
+                    type: string
+                  model:
+                    default: llama3.1:8b-instruct-q4_K_M
+                    description: Model is the Ollama model tag to use for inference.
+                    type: string
+                  notificationChannels:
+                    description: NotificationChannels configures where AI incident
+                      reports are sent.
+                    properties:
+                      kubernetesEvents:
+                        default: true
+                        description: KubernetesEvents controls whether AI reports
+                          are also emitted as Kubernetes Events.
+                        type: boolean
+                      pagerDutyKeySecret:
+                        description: PagerDutyKeySecret is the name of the Secret
+                          containing the PagerDuty Events API key.
+                        type: string
+                      slackWebhookSecret:
+                        description: SlackWebhookSecret is the name of the Secret
+                          containing the Slack incoming webhook URL.
+                        type: string
+                    type: object
+                  timeoutSeconds:
+                    default: 30
+                    description: TimeoutSeconds is the maximum time to wait for an
+                      Ollama response.
+                    format: int32
+                    type: integer
+                type: object
+              analytics:
+                description: Analytics configures the ClickHouse analytics ingestion
+                  plane.
+                properties:
+                  anomalyDetection:
+                    description: AnomalyDetection enables ML-based anomaly detection
+                      queries.
+                    properties:
+                      diskExhaustionHorizonHours:
+                        default: 48
+                        description: DiskExhaustionHorizonHours is the projected hours-to-full
+                          that triggers a warning.
+                        format: int32
+                        type: integer
+                      enabled:
+                        default: true
+                        description: Enabled controls whether anomaly detection queries
+                          run during each reconcile.
+                        type: boolean
+                      evaluationIntervalSeconds:
+                        default: 60
+                        description: EvaluationIntervalSeconds is how often anomaly
+                          queries run (independent of probe interval).
+                        format: int32
+                        type: integer
+                      peerChurnVelocityThreshold:
+                        default: 5
+                        description: PeerChurnVelocityThreshold is the peer count
+                          delta/minute that signals network instability.
+                        format: int32
+                        type: integer
+                      rewardDecayPercent:
+                        default: 30
+                        description: RewardDecayPercent is the percentage drop in
+                          rewards (vs 7-day avg) that signals degradation.
+                        format: int32
+                        type: integer
+                      syncDriftThreshold:
+                        default: 50
+                        description: SyncDriftThreshold is the block lag delta (blocks/minute)
+                          that signals sync drift.
+                        format: int64
+                        type: integer
+                    type: object
+                  clickhouseRef:
+                    description: ClickHouseRef is the connection configuration for
+                      the ClickHouse cluster.
+                    properties:
+                      cluster:
+                        description: Cluster is the ClickHouse cluster name for ON
+                          CLUSTER DDL.
+                        type: string
+                      credentialsSecret:
+                        description: CredentialsSecret is the name of the Kubernetes
+                          Secret with username/password keys.
+                        type: string
+                      database:
+                        default: taonode_guardian
+                        description: Database is the target ClickHouse database name.
+                        type: string
+                      endpoint:
+                        description: Endpoint is the ClickHouse connection string
+                          (e.g., "clickhouse://host:9000").
+                        type: string
+                      tls:
+                        default: false
+                        description: TLS enables TLS for the ClickHouse connection.
+                        type: boolean
+                    required:
+                    - credentialsSecret
+                    - endpoint
+                    type: object
+                  enabled:
+                    default: true
+                    description: Enabled controls whether analytics ingestion is active.
+                    type: boolean
+                  ingestion:
+                    description: Ingestion controls batch sizes, flush intervals,
+                      and which event types to ingest.
+                    properties:
+                      batchSize:
+                        default: 5000
+                        description: BatchSize is the number of rows to accumulate
+                          before flushing to ClickHouse.
+                        format: int32
+                        minimum: 100
+                        type: integer
+                      chainEvents:
+                        default: true
+                        description: ChainEvents enables ingestion of on-chain events
+                          (transfers, staking, etc.).
+                        type: boolean
+                      flushIntervalSeconds:
+                        default: 10
+                        description: FlushIntervalSeconds is the maximum time between
+                          flushes regardless of batch fullness.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      minerTelemetry:
+                        default: true
+                        description: MinerTelemetry enables ingestion of miner performance
+                          metrics.
+                        type: boolean
+                      reconcileAudit:
+                        default: true
+                        description: ReconcileAudit enables ingestion of reconcile
+                          loop audit records.
+                        type: boolean
+                    type: object
+                  retention:
+                    description: Retention controls TTL policies for raw and aggregated
+                      data.
+                    properties:
+                      aggregatedDataDays:
+                        default: 365
+                        description: AggregatedDataDays is the retention period for
+                          hourly rollup tables.
+                        format: int32
+                        type: integer
+                      auditDataDays:
+                        default: 90
+                        description: AuditDataDays is the retention period for reconcile
+                          audit records.
+                        format: int32
+                        type: integer
+                      rawDataDays:
+                        default: 30
+                        description: RawDataDays is the retention period for raw telemetry
+                          rows.
+                        format: int32
+                        type: integer
+                    type: object
+                required:
+                - clickhouseRef
+                - ingestion
+                - retention
+                type: object
+              chainStorage:
+                description: ChainStorage configures the persistent volume for chain
+                  data.
+                properties:
+                  autoExpand:
+                    description: AutoExpand configures automatic PVC expansion when
+                      disk usage exceeds a threshold.
+                    properties:
+                      incrementPercent:
+                        description: IncrementPercent is how much to grow the PVC
+                          on each expansion (percentage of current size).
+                        format: int32
+                        maximum: 100
+                        minimum: 10
+                        type: integer
+                      maxSize:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        description: MaxSize is the upper bound for automatic expansion.
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                      thresholdPercent:
+                        description: ThresholdPercent is the disk usage percentage
+                          that triggers expansion.
+                        format: int32
+                        maximum: 95
+                        minimum: 50
+                        type: integer
+                    required:
+                    - incrementPercent
+                    - maxSize
+                    - thresholdPercent
+                    type: object
+                  size:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: Size is the initial requested size for the chain
+                      data PVC.
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  storageClass:
+                    description: StorageClass is the Kubernetes StorageClass to use
+                      for the chain data PVC.
+                    type: string
+                required:
+                - size
+                - storageClass
+                type: object
+              disasterRecovery:
+                description: DisasterRecovery configures multi-layer backup and recovery.
+                properties:
+                  chainDataDR:
+                    description: ChainDataDR configures cross-region replication of
+                      chain data snapshots.
+                    properties:
+                      crossRegionReplication:
+                        default: false
+                        description: CrossRegionReplication enables replication of
+                          snapshots to a secondary region.
+                        type: boolean
+                      secondaryBucket:
+                        description: SecondaryBucket is the object-storage bucket
+                          in the secondary region.
+                        type: string
+                      secondaryRegion:
+                        description: SecondaryRegion is the target region for cross-region
+                          replication.
+                        type: string
+                    type: object
+                  clickhouseDR:
+                    description: ClickHouseDR configures backup of ClickHouse analytics
+                      data.
+                    properties:
+                      backupSchedule:
+                        default: 0 3 * * *
+                        description: BackupSchedule is the cron expression for ClickHouse
+                          backup frequency.
+                        type: string
+                      destination:
+                        description: Destination specifies where to store ClickHouse
+                          backup archives.
+                        properties:
+                          bucket:
+                            description: Bucket is the object-storage bucket name
+                              (not used for volume-snapshot type).
+                            type: string
+                          credentialsSecret:
+                            description: CredentialsSecret is the name of the Kubernetes
+                              Secret containing storage credentials.
+                            type: string
+                          type:
+                            description: Type is the storage backend type.
+                            enum:
+                            - s3
+                            - gcs
+                            - minio
+                            - volume-snapshot
+                            type: string
+                        required:
+                        - type
+                        type: object
+                      retentionDays:
+                        default: 30
+                        description: RetentionDays is how long to keep ClickHouse
+                          backups.
+                        format: int32
+                        type: integer
+                    required:
+                    - destination
+                    type: object
+                  crdBackup:
+                    description: CRDBackup configures periodic CRD state backups to
+                      object storage.
+                    properties:
+                      destination:
+                        description: Destination specifies where to store the CRD
+                          backup archives.
+                        properties:
+                          bucket:
+                            description: Bucket is the object-storage bucket name
+                              (not used for volume-snapshot type).
+                            type: string
+                          credentialsSecret:
+                            description: CredentialsSecret is the name of the Kubernetes
+                              Secret containing storage credentials.
+                            type: string
+                          type:
+                            description: Type is the storage backend type.
+                            enum:
+                            - s3
+                            - gcs
+                            - minio
+                            - volume-snapshot
+                            type: string
+                        required:
+                        - type
+                        type: object
+                      schedule:
+                        default: 0 */2 * * *
+                        description: Schedule is the cron expression for CRD backup
+                          frequency.
+                        type: string
+                    required:
+                    - destination
+                    type: object
+                  enabled:
+                    default: false
+                    description: Enabled controls whether DR backups are active.
+                    type: boolean
+                  rpo:
+                    default: 4h
+                    description: RPO is the Recovery Point Objective (maximum tolerable
+                      data loss window).
+                    type: string
+                  rto:
+                    default: 30m
+                    description: RTO is the Recovery Time Objective (maximum tolerable
+                      downtime).
+                    type: string
+                type: object
+              gpu:
+                description: GPU configures GPU resource requests (for miner inference
+                  workloads).
+                properties:
+                  count:
+                    description: Count is the number of GPUs to request.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  fallbackToCPU:
+                    default: false
+                    description: FallbackToCPU allows the workload to fall back to
+                      CPU if no GPUs are available.
+                    type: boolean
+                  spotTolerant:
+                    default: false
+                    description: SpotTolerant indicates the workload can tolerate
+                      spot/preemptible GPU instances.
+                    type: boolean
+                  type:
+                    description: Type is the GPU type label (e.g., "nvidia-a100",
+                      "nvidia-t4").
+                    type: string
+                required:
+                - count
+                - type
+                type: object
+              image:
+                description: Image overrides the container image. If empty, DefaultImage
+                  from the operator is used.
+                type: string
+              monitoring:
+                description: Monitoring configures Prometheus metrics exposure and
+                  alerting rules.
+                properties:
+                  alertRules:
+                    description: AlertRules is a list of custom Prometheus alerting
+                      rules for this node.
+                    items:
+                      description: AlertRule defines a single Prometheus alerting
+                        rule.
+                      properties:
+                        duration:
+                          description: Duration is how long the condition must be
+                            true before alerting (e.g., "5m").
+                          type: string
+                        expression:
+                          description: Expression is the PromQL expression that triggers
+                            the alert.
+                          type: string
+                        name:
+                          description: Name is the alert rule name.
+                          type: string
+                        severity:
+                          description: Severity is the alert severity label (e.g.,
+                            "critical", "warning").
+                          type: string
+                      required:
+                      - duration
+                      - expression
+                      - name
+                      - severity
+                      type: object
+                    type: array
+                  enabled:
+                    default: true
+                    description: Enabled controls whether the metrics sidecar and
+                      ServiceMonitor are created.
+                    type: boolean
+                  port:
+                    default: 9615
+                    description: Port is the port on which the metrics sidecar listens.
+                    format: int32
+                    type: integer
+                type: object
+              network:
+                description: Network is the Bittensor network this node participates
+                  in.
+                enum:
+                - mainnet
+                - testnet
+                - devnet
+                type: string
+              nodeSelector:
+                additionalProperties:
+                  type: string
+                description: NodeSelector constrains which Kubernetes nodes the TaoNode
+                  pods can run on.
+                type: object
+              resources:
+                description: Resources defines CPU/memory resource requests and limits
+                  for the node container.
+                properties:
+                  claims:
+                    description: |-
+                      Claims lists the names of resources, defined in spec.resourceClaims,
+                      that are used by this container.
+
+                      This is an alpha field and requires enabling the
+                      DynamicResourceAllocation feature gate.
+
+                      This field is immutable. It can only be set for containers.
+                    items:
+                      description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                      properties:
+                        name:
+                          description: |-
+                            Name must match the name of one entry in pod.spec.resourceClaims of
+                            the Pod where this field is used. It makes that resource available
+                            inside a container.
+                          type: string
+                        request:
+                          description: |-
+                            Request is the name chosen for a request in the referenced claim.
+                            If empty, everything from the claim is made available, otherwise
+                            only the result of this request.
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                  limits:
+                    additionalProperties:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    description: |-
+                      Limits describes the maximum amount of compute resources allowed.
+                      More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                    type: object
+                  requests:
+                    additionalProperties:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    description: |-
+                      Requests describes the minimum amount of compute resources required.
+                      If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                      otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                      More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                    type: object
+                type: object
+              role:
+                allOf:
+                - enum:
+                  - subtensor
+                  - miner
+                  - validator
+                - enum:
+                  - subtensor
+                  - miner
+                  - validator
+                description: Role defines this node's role in the network.
+                type: string
+              snapshotPolicy:
+                description: SnapshotPolicy configures scheduled chain data snapshots.
+                properties:
+                  destination:
+                    description: Destination configures where snapshots are stored.
+                    properties:
+                      bucket:
+                        description: Bucket is the object-storage bucket name (not
+                          used for volume-snapshot type).
+                        type: string
+                      credentialsSecret:
+                        description: CredentialsSecret is the name of the Kubernetes
+                          Secret containing storage credentials.
+                        type: string
+                      type:
+                        description: Type is the storage backend type.
+                        enum:
+                        - s3
+                        - gcs
+                        - minio
+                        - volume-snapshot
+                        type: string
+                    required:
+                    - type
+                    type: object
+                  onSyncLoss:
+                    default: true
+                    description: OnSyncLoss triggers an emergency snapshot when sync
+                      is lost.
+                    type: boolean
+                  retentionCount:
+                    description: RetentionCount is the number of snapshots to retain.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  schedule:
+                    description: Schedule is a cron expression for snapshot timing.
+                    type: string
+                required:
+                - destination
+                - retentionCount
+                - schedule
+                type: object
+              subnetID:
+                description: SubnetID is the Bittensor subnet identifier (0 for subtensor,
+                  1-256 for subnets).
+                format: int32
+                maximum: 256
+                minimum: 0
+                type: integer
+              syncPolicy:
+                description: SyncPolicy defines sync monitoring and recovery behavior.
+                properties:
+                  maxBlockLag:
+                    description: MaxBlockLag is the maximum tolerated block lag before
+                      recovery is triggered.
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  maxRestartAttempts:
+                    default: 3
+                    description: MaxRestartAttempts is the maximum number of restart
+                      attempts before escalation.
+                    format: int32
+                    type: integer
+                  probeIntervalSeconds:
+                    default: 30
+                    description: ProbeIntervalSeconds is how often the chain health
+                      probe is invoked (in seconds).
+                    format: int32
+                    type: integer
+                  recoveryStrategy:
+                    description: RecoveryStrategy defines the action to take when
+                      MaxBlockLag is exceeded.
+                    enum:
+                    - restart
+                    - snapshot-restore
+                    - cordon-and-alert
+                    type: string
+                  syncTimeoutMinutes:
+                    default: 120
+                    description: SyncTimeoutMinutes is the maximum time to wait for
+                      re-sync before declaring failure.
+                    format: int32
+                    type: integer
+                required:
+                - maxBlockLag
+                - recoveryStrategy
+                type: object
+              tolerations:
+                description: Tolerations are applied to the TaoNode StatefulSet pods.
+                items:
+                  description: |-
+                    The pod this Toleration is attached to tolerates any taint that matches
+                    the triple <key,value,effect> using the matching operator <operator>.
+                  properties:
+                    effect:
+                      description: |-
+                        Effect indicates the taint effect to match. Empty means match all taint effects.
+                        When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.
+                      type: string
+                    key:
+                      description: |-
+                        Key is the taint key that the toleration applies to. Empty means match all taint keys.
+                        If the key is empty, operator must be Exists; this combination means to match all values and all keys.
+                      type: string
+                    operator:
+                      description: |-
+                        Operator represents a key's relationship to the value.
+                        Valid operators are Exists and Equal. Defaults to Equal.
+                        Exists is equivalent to wildcard for value, so that a pod can
+                        tolerate all taints of a particular category.
+                      type: string
+                    tolerationSeconds:
+                      description: |-
+                        TolerationSeconds represents the period of time the toleration (which must be
+                        of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default,
+                        it is not set, which means tolerate the taint forever (do not evict). Zero and
+                        negative values will be treated as 0 (evict immediately) by the system.
+                      format: int64
+                      type: integer
+                    value:
+                      description: |-
+                        Value is the taint value the toleration matches to.
+                        If the operator is Exists, the value should be empty, otherwise just a regular string.
+                      type: string
+                  type: object
+                type: array
+              validator:
+                description: Validator contains validator-specific configuration (only
+                  meaningful when Role=validator).
+                properties:
+                  coldKeyVaultRef:
+                    description: ColdKeyVaultRef is the vault reference path for the
+                      cold key (ESO integration).
+                    type: string
+                  externalSecretProvider:
+                    default: none
+                    description: ExternalSecretProvider specifies which external secrets
+                      backend to use.
+                    enum:
+                    - none
+                    - vault
+                    - aws-secrets-manager
+                    - gcp-secret-manager
+                    type: string
+                  hotKeySecret:
+                    description: HotKeySecret is the name of the Kubernetes Secret
+                      containing the validator hot key.
+                    type: string
+                  maxConcurrentValidators:
+                    default: 1
+                    description: MaxConcurrentValidators limits how many validator
+                      instances can run simultaneously.
+                    format: int32
+                    type: integer
+                  slashingProtection:
+                    default: true
+                    description: SlashingProtection enables double-sign protection.
+                    type: boolean
+                required:
+                - hotKeySecret
+                type: object
+              version:
+                description: Version is the Subtensor software version tag (used for
+                  display and annotations).
+                type: string
+            required:
+            - chainStorage
+            - network
+            - role
+            - subnetID
+            - syncPolicy
+            type: object
+          status:
+            description: TaoNodeStatus defines the observed state of TaoNode.
+            properties:
+              aiAdvisory:
+                description: AIAdvisory reflects the health and output of the AI advisor.
+                properties:
+                  avgInferenceLatencyMs:
+                    description: AvgInferenceLatencyMs is the average inference latency
+                      in milliseconds.
+                    format: int32
+                    type: integer
+                  inferencesTotal24h:
+                    description: InferencesTotal24h is the count of AI inferences
+                      in the last 24 hours.
+                    format: int32
+                    type: integer
+                  lastReport:
+                    description: LastReport is the most recent AI-generated incident
+                      report.
+                    properties:
+                      confidence:
+                        description: Confidence is the AI's confidence score as a
+                          string-encoded float (0.0–1.0).
+                        type: string
+                      recommendedAction:
+                        description: RecommendedAction is the AI's top recommended
+                          remediation action.
+                        type: string
+                      rootCauseCategory:
+                        description: RootCauseCategory is one of the 8 canonical root
+                          cause categories.
+                        type: string
+                      severity:
+                        description: Severity is the AI-assessed incident severity
+                          (e.g., "critical", "warning").
+                        type: string
+                      summary:
+                        description: Summary is the AI-generated 2-3 sentence incident
+                          summary.
+                        type: string
+                      timestamp:
+                        description: Timestamp is when the AI analysis was produced.
+                        format: date-time
+                        type: string
+                    type: object
+                  modelAvailable:
+                    description: ModelAvailable indicates whether the Ollama model
+                      is reachable.
+                    type: boolean
+                type: object
+              analytics:
+                description: Analytics reflects the health of the analytics ingestion
+                  pipeline.
+                properties:
+                  anomalyScores:
+                    description: AnomalyScores is the list of active anomalies detected
+                      in the most recent evaluation.
+                    items:
+                      description: AnomalyScoreStatus is the status representation
+                        of a detected anomaly.
+                      properties:
+                        detail:
+                          description: Detail is a human-readable description of the
+                            detected anomaly.
+                          type: string
+                        detectedAt:
+                          description: DetectedAt is when this anomaly was first detected.
+                          format: date-time
+                          type: string
+                        score:
+                          description: Score is the anomaly severity as a string-encoded
+                            float (0.0=normal, 1.0=critical).
+                          type: string
+                        type:
+                          description: Type identifies the anomaly detector (e.g.,
+                            "sync_drift", "disk_exhaustion").
+                          type: string
+                      required:
+                      - score
+                      - type
+                      type: object
+                    type: array
+                  connected:
+                    description: Connected indicates whether the ClickHouse connection
+                      is healthy.
+                    type: boolean
+                  ingestionLagMs:
+                    description: IngestionLagMs is the current end-to-end ingestion
+                      lag in milliseconds.
+                    format: int32
+                    type: integer
+                  lastIngestionTime:
+                    description: LastIngestionTime is the timestamp of the last successful
+                      ClickHouse flush.
+                    format: date-time
+                    type: string
+                  rowsIngested24h:
+                    description: RowsIngested24h is the total number of rows ingested
+                      in the last 24 hours.
+                    format: int64
+                    type: integer
+                type: object
+              chain:
+                description: Chain holds chain-level runtime information.
+                properties:
+                  epoch:
+                    description: Epoch is the current consensus epoch number.
+                    format: int64
+                    type: integer
+                  finalizedBlock:
+                    description: FinalizedBlock is the latest finalized (irreversible)
+                      block number.
+                    format: int64
+                    type: integer
+                  peerCount:
+                    description: PeerCount is the current number of connected peers.
+                    format: int32
+                    type: integer
+                  runtimeVersion:
+                    description: RuntimeVersion is the Subtensor runtime spec version
+                      string.
+                    type: string
+                type: object
+              conditions:
+                description: Conditions is the standard Kubernetes condition array
+                  for this resource.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              lastReconcileTime:
+                description: LastReconcileTime is the timestamp of the most recent
+                  reconcile loop execution.
+                format: date-time
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the .metadata.generation this status
+                  was computed from.
+                format: int64
+                type: integer
+              phase:
+                allOf:
+                - enum:
+                  - Pending
+                  - Syncing
+                  - Synced
+                  - Degraded
+                  - Recovering
+                  - Failed
+                - enum:
+                  - Pending
+                  - Syncing
+                  - Synced
+                  - Degraded
+                  - Recovering
+                  - Failed
+                description: Phase is the high-level lifecycle state of this TaoNode.
+                type: string
+              resources:
+                description: Resources holds current resource utilization metrics.
+                properties:
+                  diskUsagePercent:
+                    description: DiskUsagePercent is the percentage of the chain data
+                      PVC currently in use.
+                    format: int32
+                    type: integer
+                  estimatedMonthlyUSD:
+                    description: EstimatedMonthlyUSD is the projected monthly infrastructure
+                      cost for this node.
+                    type: string
+                  gpuUtilizationPercent:
+                    description: GPUUtilizationPercent is the current GPU utilization
+                      (nil if no GPU configured).
+                    format: int32
+                    type: integer
+                type: object
+              restartCount:
+                description: RestartCount is the total number of recovery restarts
+                  performed by the operator.
+                format: int32
+                type: integer
+              snapshot:
+                description: Snapshot holds the status of the most recent snapshot
+                  operation.
+                properties:
+                  availableSnapshots:
+                    description: AvailableSnapshots is the number of snapshots currently
+                      retained in storage.
+                    format: int32
+                    type: integer
+                  lastSnapshotSize:
+                    description: LastSnapshotSize is the compressed size in bytes
+                      of the most recent snapshot.
+                    format: int64
+                    type: integer
+                  lastSnapshotTime:
+                    description: LastSnapshotTime is the timestamp of the most recently
+                      completed snapshot.
+                    format: date-time
+                    type: string
+                type: object
+              syncState:
+                description: SyncState holds detailed blockchain synchronization metrics.
+                properties:
+                  blockLag:
+                    description: BlockLag is the difference between NetworkBlock and
+                      CurrentBlock.
+                    format: int64
+                    type: integer
+                  currentBlock:
+                    description: CurrentBlock is the latest block processed by this
+                      node.
+                    format: int64
+                    type: integer
+                  lastSyncedAt:
+                    description: LastSyncedAt is the timestamp of the last successful
+                      sync event.
+                    format: date-time
+                    type: string
+                  networkBlock:
+                    description: NetworkBlock is the latest known block on the network.
+                    format: int64
+                    type: integer
+                  state:
+                    description: State is the human-readable sync state (e.g., "syncing",
+                      "in-sync").
+                    type: string
+                  syncPercentage:
+                    description: SyncPercentage is the human-readable sync completion
+                      percentage.
+                    type: string
+                type: object
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
