@@ -1,0 +1,48 @@
+name: SonarCloud Analysis
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  sonarcloud:
+    name: SonarCloud
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.0'
+          cache: true
+      
+      - name: Install envtest (Kubebuilder assets)
+        run: |
+          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+          setup-envtest use 1.31.0 --bin-dir /usr/local/bin
+          echo "KUBEBUILDER_ASSETS=$(setup-envtest use -i -p path 1.31.0 --bin-dir /usr/local/bin)" >> $GITHUB_ENV
+
+      - name: Run tests and generate coverage
+        run: |
+          make test
+          
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=ClaudioBotelhOSB_taonode-guardian
+            -Dsonar.organization=claudiobotelhosb
+            -Dsonar.go.coverage.reportPaths=cover.out
+            -Dsonar.sources=.
+            -Dsonar.exclusions=**/*_test.go,**/vendor/**,**/mocks/**,api/**,hack/**,bin/**,config/**,dist/**,docs/**
+            -Dsonar.tests=.
+            -Dsonar.test.inclusions=**/*_test.go
