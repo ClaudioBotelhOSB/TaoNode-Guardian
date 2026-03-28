@@ -1,1 +1,4 @@
 *.md
+bin/
+cover.out
+*.tar.gz
