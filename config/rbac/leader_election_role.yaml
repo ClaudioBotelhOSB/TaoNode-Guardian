@@ -1,0 +1,24 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: taonode-guardian-leader-election-role
+  namespace: taonode-guardian-system
+  labels:
+    app.kubernetes.io/name: taonode-guardian
+    app.kubernetes.io/component: rbac
+rules:
+  # controller-runtime v0.15+ uses Lease-based leader election exclusively.
+  # ConfigMap rules are retained for compatibility with older client-go builds.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Lease object named "tao.guardian.io" — see LeaderElectionID in cmd/main.go.
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Events emitted by the leader-election library itself.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]

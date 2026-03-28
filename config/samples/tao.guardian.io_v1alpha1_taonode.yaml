@@ -1,0 +1,149 @@
+apiVersion: tao.guardian.io/v1alpha1
+kind: TaoNode
+metadata:
+  name: validator-testnet-sn1
+  namespace: taonode-guardian-system
+  labels:
+    app.kubernetes.io/name: taonode-guardian
+    tao.guardian.io/network: testnet
+    tao.guardian.io/role: validator
+    tao.guardian.io/subnet: "1"
+spec:
+  # ── Identity ────────────────────────────────────────────────────────────────
+  network: testnet
+  subnetID: 1
+  role: validator
+  image: "ghcr.io/opentensor/subtensor:latest"
+  version: "1.9.4"
+
+  # ── Compute resources ───────────────────────────────────────────────────────
+  resources:
+    requests:
+      cpu: "2"
+      memory: 4Gi
+    limits:
+      cpu: "4"
+      memory: 8Gi
+
+  # ── Chain storage ────────────────────────────────────────────────────────────
+  chainStorage:
+    storageClass: gp3
+    size: 500Gi
+    autoExpand:
+      thresholdPercent: 80
+      maxSize: 2Ti
+      incrementPercent: 25
+
+  # ── Sync policy ──────────────────────────────────────────────────────────────
+  syncPolicy:
+    maxBlockLag: 100
+    recoveryStrategy: restart
+    maxRestartAttempts: 3
+    probeIntervalSeconds: 30
+    syncTimeoutMinutes: 60
+
+  # ── Snapshot policy ──────────────────────────────────────────────────────────
+  snapshotPolicy:
+    schedule: "0 2 * * *"
+    retentionCount: 7
+    onSyncLoss: true
+    destination:
+      type: s3
+      bucket: taonode-guardian-snapshots-testnet
+      credentialsSecret: taonode-guardian-s3-creds
+
+  # ── Validator-specific configuration ────────────────────────────────────────
+  # hotKeySecret must contain a 'hotkey' key with the SS58-encoded Bittensor hot key.
+  # kubectl create secret generic validator-hotkey \
+  #   --from-file=hotkey=/path/to/hotkey \
+  #   -n taonode-guardian-system
+  validator:
+    hotKeySecret: validator-hotkey
+    coldKeyVaultRef: "secret/data/bittensor/testnet/validator/coldkey"
+    externalSecretProvider: vault
+    slashingProtection: true
+    maxConcurrentValidators: 1
+
+  # ── Prometheus monitoring ────────────────────────────────────────────────────
+  monitoring:
+    enabled: true
+    port: 9615
+    alertRules:
+      - name: TaoNodeHighBlockLag
+        expression: 'taonode_block_lag{node_name="validator-testnet-sn1",role="validator"} > 50'
+        duration: "5m"
+        severity: warning
+      - name: TaoNodeSyncLost
+        expression: 'taonode_sync_state_info{node_name="validator-testnet-sn1",state="lost"} == 1'
+        duration: "2m"
+        severity: critical
+      - name: TaoNodeDiskUsageHigh
+        expression: 'taonode_disk_usage_percent{node_name="validator-testnet-sn1"} > 85'
+        duration: "10m"
+        severity: warning
+
+  # ── Analytics — ClickHouse ingestion plane ──────────────────────────────────
+  # Operator reads CLICKHOUSE_ENDPOINT from its own env; this spec block is
+  # used by the controller to set per-node retention and ingestion policies.
+  analytics:
+    enabled: true
+    clickhouseRef:
+      endpoint: "clickhouse://clickhouse.taonode-guardian-system.svc:9000"
+      database: taonode_guardian
+      credentialsSecret: taonode-guardian-clickhouse
+      tls: false
+    ingestion:
+      batchSize: 5000
+      flushIntervalSeconds: 10
+      chainEvents: true
+      minerTelemetry: false  # false for validators; true for miners
+      reconcileAudit: true
+    anomalyDetection:
+      enabled: true
+      evaluationIntervalSeconds: 60
+      syncDriftThreshold: 50
+      peerChurnVelocityThreshold: 5
+      diskExhaustionHorizonHours: 48
+      rewardDecayPercent: 30
+    retention:
+      rawDataDays: 30
+      aggregatedDataDays: 365
+      auditDataDays: 90
+
+  # ── AI advisor — Ollama-backed incident analysis ────────────────────────────
+  # Deploy Ollama in-cluster and set OLLAMA_URL in the operator Deployment,
+  # or point the endpoint field at an external Ollama instance.
+  aiAdvisor:
+    enabled: true
+    endpoint: "http://ollama.taonode-guardian-system.svc:11434"
+    model: "llama3.1:8b-instruct-q4_K_M"
+    timeoutSeconds: 30
+    minAnomalyScoreForAdvisory: "0.6"
+    contextWindowTokens: 4096
+    notificationChannels:
+      slackWebhookSecret: taonode-guardian-slack-webhook
+      kubernetesEvents: true
+
+  # ── Disaster recovery ────────────────────────────────────────────────────────
+  disasterRecovery:
+    enabled: true
+    rpo: "4h"
+    rto: "30m"
+    crdBackup:
+      schedule: "0 */2 * * *"
+      destination:
+        type: s3
+        bucket: taonode-guardian-dr-testnet
+        credentialsSecret: taonode-guardian-s3-creds
+    chainDataDR:
+      crossRegionReplication: false
+
+  # ── Scheduling ───────────────────────────────────────────────────────────────
+  nodeSelector:
+    kubernetes.io/os: linux
+
+  tolerations:
+    - key: "dedicated"
+      operator: Equal
+      value: "bittensor-validator"
+      effect: NoSchedule

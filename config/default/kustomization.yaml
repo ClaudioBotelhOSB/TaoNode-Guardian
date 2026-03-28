@@ -1,0 +1,36 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# All namespaced resources in the sub-bases are placed into this namespace.
+# Cluster-scoped resources (CRD, ClusterRole, ClusterRoleBinding) are unaffected.
+namespace: taonode-guardian-system
+
+resources:
+  # Namespace must come first so it exists before any namespaced resource is created.
+  - namespace.yaml
+  # Generated CRD — tao.guardian.io_taonodes.yaml
+  - ../crd
+  # RBAC: ServiceAccount, ClusterRole, ClusterRoleBinding, leader-election Role + RoleBinding
+  - ../rbac
+  # Operator Deployment (image pinned in ../manager/kustomization.yaml)
+  - ../manager
+
+# Labels injected into every resource (non-selector safe — avoids breaking matchLabels).
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/part-of: taonode-guardian
+
+# ── Webhook + cert-manager overlay (production) ──────────────────────────────
+# Uncomment the blocks below and re-run `kustomize build config/default` after
+# deploying cert-manager and creating the Issuer/Certificate resources.
+#
+# patches:
+#   - path: patches/manager_webhook_patch.yaml
+#     target:
+#       kind: Deployment
+#       name: taonode-guardian-controller-manager
+#
+# resources:
+#   - ../certmanager
+#   - ../webhook
