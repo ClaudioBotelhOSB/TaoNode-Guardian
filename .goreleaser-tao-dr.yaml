@@ -1,0 +1,98 @@
+# GoReleaser configuration for the tao-dr standalone CLI.
+# Run from the repo root:
+#   goreleaser release --config .goreleaser-tao-dr.yaml --clean
+#
+# This file is intentionally separate from .goreleaser.yaml (operator) so that
+# the two CLIs can be released independently on their own tag cadences.
+version: 2
+
+project_name: tao-dr
+
+# ── Build ──────────────────────────────────────────────────────────────────────
+builds:
+  - id: tao-dr
+    binary: tao-dr
+    main: ./cmd/tao-dr
+    dir: tools/tao-dr          # go build runs inside this module root
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .CommitDate }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    flags:
+      - -trimpath
+
+# ── Archives ───────────────────────────────────────────────────────────────────
+archives:
+  - id: tao-dr-archive
+    builds:
+      - tao-dr
+    name_template: "tao-dr_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format: tar.gz
+    files:
+      - LICENSE
+      - README.md
+
+# ── Checksums ──────────────────────────────────────────────────────────────────
+checksum:
+  name_template: "tao-dr_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+# ── Changelog ─────────────────────────────────────────────────────────────────
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - "^ci:"
+      - "Merge pull request"
+      - "Merge branch"
+  groups:
+    - title: "Breaking Changes"
+      regexp: "^.*!:.*$"
+      order: 0
+    - title: "New Features"
+      regexp: "^.*feat.*:.*$"
+      order: 1
+    - title: "Bug Fixes"
+      regexp: "^.*fix.*:.*$"
+      order: 2
+    - title: "Performance"
+      regexp: "^.*perf.*:.*$"
+      order: 3
+    - title: "Other"
+      order: 999
+
+# ── Release ────────────────────────────────────────────────────────────────────
+release:
+  github:
+    owner: ClaudioBotelhOSB
+    name: TaoNode-Guardian
+  name_template: "tao-dr {{ .Tag }}"
+  footer: |
+    ---
+
+    ### Verify the release (cosign keyless)
+
+    ```bash
+    # Install cosign: https://docs.sigstore.dev/cosign/installation/
+
+    cosign verify-blob \
+      --certificate-identity "https://github.com/ClaudioBotelhOSB/TaoNode-Guardian/.github/workflows/release.yaml@refs/tags/{{ .Tag }}" \
+      --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+      --bundle tao-dr_{{ .Version }}_linux_amd64.tar.gz.bundle \
+      tao-dr_{{ .Version }}_linux_amd64.tar.gz
+    ```
+
+    Full documentation: [tools/tao-dr/](https://github.com/ClaudioBotelhOSB/TaoNode-Guardian/tree/main/tools/tao-dr)

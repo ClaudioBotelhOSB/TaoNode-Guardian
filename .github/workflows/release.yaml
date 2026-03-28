@@ -1,0 +1,207 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write # required for Cosign OIDC keyless signing
+
+env:
+  IMAGE: ghcr.io/claudiobotelhosb/taonode-guardian
+  PROBE_IMAGE: ghcr.io/claudiobotelhosb/taonode-guardian-probe
+  GO_VERSION: '1.23.0'
+
+jobs:
+  # ── 1. BINARY RELEASE — GoReleaser builds binaries, archives, and changelog ─
+  goreleaser:
+    name: GoReleaser
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for changelog)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go ${{ env.GO_VERSION }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── 2. DOCKER — Multi-arch image build and push ────────────────────────────
+  docker:
+    name: Build & Push Multi-arch Images
+    runs-on: ubuntu-latest
+    outputs:
+      controller_digest: ${{ steps.push-controller.outputs.digest }}
+      probe_digest: ${{ steps.push-probe.outputs.digest }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (arm64 cross-compilation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Controller image
+      - name: Extract metadata — controller
+        id: meta-controller
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern=v{{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Build and push controller (linux/amd64 + linux/arm64)
+        id: push-controller
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta-controller.outputs.tags }}
+          labels: ${{ steps.meta-controller.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+
+      # Chain-probe sidecar image
+      - name: Extract metadata — probe sidecar
+        id: meta-probe
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.PROBE_IMAGE }}
+          tags: |
+            type=semver,pattern=v{{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Build and push probe sidecar (linux/amd64 + linux/arm64)
+        id: push-probe
+        uses: docker/build-push-action@v6
+        with:
+          context: hack/chain-probe
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta-probe.outputs.tags }}
+          labels: ${{ steps.meta-probe.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── 3. SIGN — Cosign OIDC keyless signing + SBOM attestation ──────────────
+  sign:
+    name: Sign Release Images
+    runs-on: ubuntu-latest
+    needs: [docker]
+    permissions:
+      packages: write
+      id-token: write
+    steps:
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sign controller image (OIDC keyless)
+        run: |
+          cosign sign --yes \
+            ${{ env.IMAGE }}@${{ needs.docker.outputs.controller_digest }}
+
+      - name: Sign probe image (OIDC keyless)
+        run: |
+          cosign sign --yes \
+            ${{ env.PROBE_IMAGE }}@${{ needs.docker.outputs.probe_digest }}
+
+      - name: Generate controller SBOM with Syft
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE }}@${{ needs.docker.outputs.controller_digest }}
+          artifact-name: sbom-controller-${{ github.ref_name }}.spdx.json
+          output-file: sbom-controller-${{ github.ref_name }}.spdx.json
+          format: spdx-json
+
+      - name: Generate probe SBOM with Syft
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.PROBE_IMAGE }}@${{ needs.docker.outputs.probe_digest }}
+          artifact-name: sbom-probe-${{ github.ref_name }}.spdx.json
+          output-file: sbom-probe-${{ github.ref_name }}.spdx.json
+          format: spdx-json
+
+      - name: Attest controller SBOM with Cosign
+        run: |
+          cosign attest --yes \
+            --predicate sbom-controller-${{ github.ref_name }}.spdx.json \
+            --type spdxjson \
+            ${{ env.IMAGE }}@${{ needs.docker.outputs.controller_digest }}
+
+      - name: Attest probe SBOM with Cosign
+        run: |
+          cosign attest --yes \
+            --predicate sbom-probe-${{ github.ref_name }}.spdx.json \
+            --type spdxjson \
+            ${{ env.PROBE_IMAGE }}@${{ needs.docker.outputs.probe_digest }}
+
+      - name: Upload SBOM to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            sbom-controller-${{ github.ref_name }}.spdx.json
+            sbom-probe-${{ github.ref_name }}.spdx.json
+
+  # ── 4. SECURITY REPORT — Trivy JSON report attached to GitHub Release ──────
+  security-report:
+    name: Security Scan & Attach Report
+    runs-on: ubuntu-latest
+    needs: [docker]
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - name: controller
+            image: ghcr.io/claudiobotelhosb/taonode-guardian
+          - name: probe
+            image: ghcr.io/claudiobotelhosb/taonode-guardian-probe
+    steps:
+      - name: Run Trivy (JSON — release asset)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ matrix.target.image }}:${{ github.ref_name }}
+          format: json
+          output: trivy-${{ matrix.target.name }}-${{ github.ref_name }}.json
+          severity: CRITICAL,HIGH,MEDIUM
+          ignore-unfixed: false
+
+      - name: Attach Trivy report to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: trivy-${{ matrix.target.name }}-${{ github.ref_name }}.json

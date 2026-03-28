@@ -1,0 +1,92 @@
+version: 2
+
+project_name: taonode-guardian
+
+before:
+  hooks:
+    - go mod tidy
+    - go mod verify
+
+# ── BUILDS ─────────────────────────────────────────────────────────────────────
+builds:
+  - id: manager
+    main: ./cmd/main.go
+    binary: taonode-guardian
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    # Reproducible builds: stamp commit timestamp into binary metadata
+    mod_timestamp: '{{ .CommitTimestamp }}'
+    ldflags:
+      - -s -w
+
+# ── ARCHIVES ───────────────────────────────────────────────────────────────────
+archives:
+  - id: default
+    builds: [manager]
+    name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    format: tar.gz
+    files:
+      - LICENSE
+      - README.md
+
+# ── CHECKSUM ───────────────────────────────────────────────────────────────────
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+# ── CHANGELOG ──────────────────────────────────────────────────────────────────
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - 'Merge pull request'
+      - 'Merge branch'
+  groups:
+    - title: 'Breaking Changes'
+      regexp: '^.*!:.*$'
+      order: 0
+    - title: 'New Features'
+      regexp: '^feat'
+      order: 1
+    - title: 'Bug Fixes'
+      regexp: '^fix'
+      order: 2
+    - title: 'Performance'
+      regexp: '^perf'
+      order: 3
+    - title: Other
+      order: 999
+
+# ── GITHUB RELEASE ─────────────────────────────────────────────────────────────
+release:
+  github:
+    owner: ClaudioBotelhOSB
+    name: taonode-guardian
+  draft: false
+  prerelease: auto
+  name_template: 'Release {{ .Tag }}'
+  footer: |
+    ## Docker Images
+
+    ```bash
+    docker pull ghcr.io/claudiobotelhosb/taonode-guardian:{{ .Tag }}
+    docker pull ghcr.io/claudiobotelhosb/taonode-guardian-probe:{{ .Tag }}
+    ```
+
+    ## Verify image signature with Cosign
+
+    ```bash
+    cosign verify ghcr.io/claudiobotelhosb/taonode-guardian:{{ .Tag }} \
+      --certificate-identity-regexp="https://github.com/ClaudioBotelhOSB/taonode-guardian/.github/workflows/release.yaml" \
+      --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
+    ```
