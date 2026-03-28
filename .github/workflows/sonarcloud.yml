@@ -39,8 +39,8 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
-            -Dsonar.projectKey=ClaudioBotelhOSB_taonode-guardian
-            -Dsonar.organization=claudiobotelhosb
+            -Dsonar.projectKey=TaoNode-Guardian
+            -Dsonar.organization=botelho-claudiosb
             -Dsonar.go.coverage.reportPaths=cover.out
             -Dsonar.sources=.
             -Dsonar.exclusions=**/*_test.go,**/vendor/**,**/mocks/**,api/**,hack/**,bin/**,config/**,dist/**,docs/**
