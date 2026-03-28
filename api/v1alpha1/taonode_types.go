@@ -367,6 +367,13 @@ type NotificationChannels struct {
 	// +optional
 	PagerDutyKeySecret string `json:"pagerDutyKeySecret,omitempty"`
 
+	// DiscordWebhookSecret is the name of the Secret containing the Discord incoming webhook URL
+	// (key: "url"). When set, the AI advisor POSTs a colour-coded Embed to the Discord channel
+	// for every IncidentReport whose severity meets MinAnomalyScoreForAdvisory.
+	// See config/discord-webhook-example.yaml for the expected Secret shape.
+	// +optional
+	DiscordWebhookSecret string `json:"discordWebhookSecret,omitempty"`
+
 	// KubernetesEvents controls whether AI reports are also emitted as Kubernetes Events.
 	// +kubebuilder:default=true
 	KubernetesEvents bool `json:"kubernetesEvents,omitempty"`

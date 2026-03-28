@@ -1,0 +1,34 @@
+# config/discord-webhook-example.yaml
+#
+# Kubernetes Secret for the Discord incoming webhook URL.
+# Referenced by spec.aiAdvisor.notificationChannels.discordWebhookSecret in TaoNode CRs.
+#
+# USAGE:
+#   1. Replace the placeholder URL with your real Discord webhook.
+#      Create one at: Server Settings → Integrations → Webhooks → New Webhook.
+#   2. Apply to the operator namespace:
+#        kubectl apply -f config/discord-webhook-example.yaml \
+#          -n taonode-guardian-system
+#   3. Reference in a TaoNode CR:
+#        spec:
+#          aiAdvisor:
+#            notificationChannels:
+#              discordWebhookSecret: discord-ai-alerts
+#
+# SECURITY NOTE:
+#   This file contains a placeholder URL. Never commit real webhook URLs to git.
+#   For production, provision this secret via External Secrets Operator or
+#   a sealed-secrets workflow and add config/discord-webhook*.yaml to .gitignore.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: discord-ai-alerts
+  namespace: taonode-guardian-system
+  labels:
+    app.kubernetes.io/managed-by: taonode-guardian
+    app.kubernetes.io/component: notification
+type: Opaque
+stringData:
+  # url is the full Discord webhook URL.
+  # Format: https://discord.com/api/webhooks/{webhook.id}/{webhook.token}
+  url: "https://discord.com/api/webhooks/REPLACE_WITH_WEBHOOK_ID/REPLACE_WITH_WEBHOOK_TOKEN"
