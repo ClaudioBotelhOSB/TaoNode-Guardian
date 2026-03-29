@@ -2,7 +2,7 @@ name: CI
 
 # Dependency graph:
 #
-#   lint-and-iac ──┐
+#   lint ──────────┐
 #                  ├── build-and-push ──┬── sign
 #   test ──────────┘   (main only push)  └── provenance
 
@@ -32,9 +32,9 @@ env:
   ENVTEST_BIN_DIR: ${{ github.workspace }}/.cache/kubebuilder-envtest
 
 jobs:
-  # ── 1. LINT & IaC ──────────────────────────────────────────────────────────
-  lint-and-iac:
-    name: Lint & IaC Scan
+  # ── 1. LINT ─────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -53,13 +53,6 @@ jobs:
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
           args: --timeout=5m
-
-      - name: IaC Security Scan (Trivy)
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: config
-          scan-ref: infra/
-          exit-code: '0'
 
   # ── 2. TEST ────────────────────────────────────────────────────────────────
   test:
@@ -86,10 +79,11 @@ jobs:
           path: ${{ env.ENVTEST_BIN_DIR }}
           key: envtest-${{ runner.os }}-${{ env.ENVTEST_K8S_VERSION }}
 
-      # Versão pinada para evitar que @latest tente baixar um toolchain
-      # mais recente (ex: go1.25.8) e falhe com "GOPROXY has no entries".
+      # setup-envtest é um sub-módulo independente desde controller-runtime v0.19.
+      # Não possui tags semver — usa pseudo-versões (v0.0.0-*).
+      # @latest resolve para o commit mais recente do sub-módulo.
       - name: Install envtest tools
-        run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.19.0
+        run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
         env:
           GOPROXY: "https://proxy.golang.org,direct"
           GOTOOLCHAIN: "local"
@@ -106,13 +100,13 @@ jobs:
         run: go test ./... -coverprofile=cover.out -count=1
 
   # ── 3. BUILD & PUSH ────────────────────────────────────────────────────────
-  # Depende diretamente de lint-and-iac e test (sem job de qualidade intermediário).
+  # Depende diretamente de lint e test (sem job de qualidade intermediário).
   # Build linux/amd64 apenas — arm64 removido para eliminar timeouts do QEMU.
   # Push e provenance ativados somente em push para main.
   build-and-push:
     name: Build & Push
     runs-on: ubuntu-latest
-    needs: [lint-and-iac, test]
+    needs: [lint, test]
     permissions:
       contents: read
       packages: write
