@@ -184,7 +184,7 @@ jobs:
       - name: Generate SBOM with Syft
         uses: anchore/sbom-action@v0
         with:
-          image: ${{ env.IMAGE }}@${{ needs.build-and-push.outputs.digest }}
+          image: ghcr.io/claudiobotelhosb/taonode-guardian@${{ needs.build-and-push.outputs.digest }}
           artifact-name: sbom.spdx.json
           output-file: sbom.spdx.json
           format: spdx-json
@@ -206,8 +206,9 @@ jobs:
       packages: write
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.0.0
     with:
-      image: ${{ env.IMAGE }}
+      image: ghcr.io/claudiobotelhosb/taonode-guardian
       digest: ${{ needs.build-and-push.outputs.digest }}
       registry-username: ${{ github.actor }}
     secrets:
       registry-password: ${{ secrets.GITHUB_TOKEN }}
+
