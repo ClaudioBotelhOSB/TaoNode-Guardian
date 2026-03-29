@@ -1,4 +1,4 @@
-*.md
+docs/*.md
 bin/
 cover.out
 *.tar.gz
@@ -24,3 +24,4 @@ infra/gcp/google-cloud-sdk/
 infra/gcp/google-cloud-cli-*.tar.gz
 infra/aws/aws-cli/
 infra/azure/azure-cli/
+infra/aws/outputs.tf.bkp
