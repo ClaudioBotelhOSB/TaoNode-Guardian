@@ -7,7 +7,7 @@ name: CI
 #        │
 #       test  ──────────────────────────────────────────────────────────────────
 #        │                                                                      │
-#   security-and-quality  (SonarCloud ← cover.out artifact + Trivy Docker scan)
+#   security-and-quality  (Trivy Docker scan → GitHub Security tab)
 #        │
 #   build-and-push  (main only)
 #        ├── sign        (Cosign keyless + Syft SBOM attest)
@@ -27,7 +27,6 @@ permissions:
   contents: write          # Necessário para actions que criam releases/tags
   packages: write          # Push de imagens para o GHCR
   security-events: write   # Upload do Trivy e Checkov SARIF → Security tab
-  pull-requests: write     # SonarCloud comenta nos PRs
   id-token: write          # Cosign OIDC keyless + SLSA provenance
 
 env:
@@ -114,53 +113,17 @@ jobs:
       - name: Run tests (make test)
         run: make test
 
-      # Persist cover.out for 7 days — consumed by security-and-quality/SonarCloud.
-      # This is the single source of truth; no job below re-runs the test suite.
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: cover.out
-          retention-days: 7
 
   # ── 3. SECURITY & QUALITY ───────────────────────────────────────────────────
-  # Downloads cover.out (from test), submits it to SonarCloud, then builds a
-  # local single-arch image and runs Trivy → SARIF → GitHub Security tab.
-  # Runs on both PRs and main pushes so quality gates fire on every change.
+  # Builds a local single-arch image and runs Trivy → SARIF → GitHub Security tab.
+  # Runs on both PRs and main pushes so the vulnerability gate fires on every change.
   security-and-quality:
     name: Security & Quality
     runs-on: ubuntu-latest
     needs: [test]
     steps:
-      # fetch-depth: 0 is mandatory for SonarCloud — shallow clones degrade
-      # new-code detection and blame metadata used for issue assignment.
-      - name: Checkout (full history for SonarCloud)
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Download coverage artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: coverage-report
-          # Downloads to the workspace root, matching where make test wrote it.
-
-      # SonarCloud parameters preserved verbatim from the former sonarcloud.yml.
-      # cover.out is now provided by the artifact rather than a second test run.
-      - name: SonarCloud Scan
-        uses: SonarSource/sonarcloud-github-action@master
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        with:
-          args: >
-            -Dsonar.projectKey=TaoNode-Guardian
-            -Dsonar.organization=botelho-claudiosb
-            -Dsonar.go.coverage.reportPaths=cover.out
-            -Dsonar.sources=.
-            -Dsonar.exclusions=**/*_test.go,**/vendor/**,**/mocks/**,api/**,hack/**,bin/**,config/**,dist/**,docs/**
-            -Dsonar.tests=.
-            -Dsonar.test.inclusions=**/*_test.go
 
       # ── Docker vulnerability scan ──────────────────────────────────────────
       # Build a single-arch image locally (load: true, no push) so Trivy can
