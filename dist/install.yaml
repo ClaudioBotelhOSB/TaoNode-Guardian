@@ -11,7 +11,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.16.1
+    controller-gen.kubebuilder.io/version: v0.20.1
   labels:
     app.kubernetes.io/part-of: taonode-guardian
   name: taonodes.tao.guardian.io
@@ -109,6 +109,13 @@ spec:
                     description: NotificationChannels configures where AI incident
                       reports are sent.
                     properties:
+                      discordWebhookSecret:
+                        description: |-
+                          DiscordWebhookSecret is the name of the Secret containing the Discord incoming webhook URL
+                          (key: "url"). When set, the AI advisor POSTs a colour-coded Embed to the Discord channel
+                          for every IncidentReport whose severity meets MinAnomalyScoreForAdvisory.
+                          See config/discord-webhook-example.yaml for the expected Secret shape.
+                        type: string
                       kubernetesEvents:
                         default: true
                         description: KubernetesEvents controls whether AI reports
@@ -1175,6 +1182,8 @@ rules:
   - list
   - watch
   - create
+  - update
+  - patch
 - apiGroups:
   - ""
   resources:
@@ -1183,6 +1192,7 @@ rules:
   - get
   - list
   - watch
+  - delete
 - apiGroups:
   - ""
   resources:
@@ -1196,13 +1206,38 @@ rules:
   - patch
   - delete
 - apiGroups:
-  - ""
+  - coordination.k8s.io
   resources:
-  - secrets
+  - leases
   verbs:
   - get
   - list
   - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - snapshot.storage.k8s.io
+  resources:
+  - volumesnapshots
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - delete
+- apiGroups:
+  - monitoring.coreos.com
+  resources:
+  - servicemonitors
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
 - apiGroups:
   - ""
   resources:

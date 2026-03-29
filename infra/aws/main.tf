@@ -86,7 +86,7 @@ resource "aws_route_table_association" "public" {
 
 resource "aws_security_group" "k3s" {
   name        = "taonode-guardian-k3s-sg"
-  description = "K3s single-node — ingress on 22 (SSH), 6443 (K3s API), 80 (HTTP), 443 (HTTPS)."
+  description = "K3s single-node - ingress on 22 (SSH), 6443 (K3s API), 80 (HTTP), 443 (HTTPS)."
   vpc_id      = aws_vpc.k3s.id
 
   ingress {

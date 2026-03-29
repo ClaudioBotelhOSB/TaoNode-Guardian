@@ -9,6 +9,8 @@ cover.out
 *.tfstate
 *.tfstate.*
 .terraform.tfstate.lock.info
+.terraform.lock.hcl
+**/.terraform.lock.hcl
 *.tfvars
 *.tfvars.json
 crash.log
@@ -16,3 +18,9 @@ override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
+
+# Cloud CLI SDKs (instalados localmente, não devem ir pro repositório)
+infra/gcp/google-cloud-sdk/
+infra/gcp/google-cloud-cli-*.tar.gz
+infra/aws/aws-cli/
+infra/azure/azure-cli/

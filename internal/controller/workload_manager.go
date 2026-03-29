@@ -149,24 +149,28 @@ func (r *TaoNodeReconciler) ensureNodeWorkload(ctx context.Context, tn *taov1alp
 			},
 		}
 
-		// VolumeClaimTemplate for chain data — managed by StatefulSet lifecycle.
-		// The PVC name becomes: chain-data-{sts-name}-{ordinal}
-		sts.Spec.VolumeClaimTemplates = []corev1.PersistentVolumeClaim{
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:   "chain-data",
-					Labels: r.labelsForNode(tn),
-				},
-				Spec: corev1.PersistentVolumeClaimSpec{
-					AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
-					StorageClassName: &tn.Spec.ChainStorage.StorageClass,
-					Resources: corev1.VolumeResourceRequirements{
-						Requests: corev1.ResourceList{
-							corev1.ResourceStorage: tn.Spec.ChainStorage.Size,
+		// VolumeClaimTemplate is immutable after StatefulSet creation — only set
+		// it when the StatefulSet is being created for the first time (empty slice).
+		// Subsequent reconciles must leave this field untouched to avoid the
+		// "Forbidden: updates to statefulset spec for fields other than..." error.
+		if len(sts.Spec.VolumeClaimTemplates) == 0 {
+			sts.Spec.VolumeClaimTemplates = []corev1.PersistentVolumeClaim{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   "chain-data",
+						Labels: r.labelsForNode(tn),
+					},
+					Spec: corev1.PersistentVolumeClaimSpec{
+						AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+						StorageClassName: &tn.Spec.ChainStorage.StorageClass,
+						Resources: corev1.VolumeResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceStorage: tn.Spec.ChainStorage.Size,
+							},
 						},
 					},
 				},
-			},
+			}
 		}
 
 		return ctrl.SetControllerReference(tn, sts, r.Scheme)
@@ -297,7 +301,8 @@ func (r *TaoNodeReconciler) buildInitContainers(tn *taov1alpha1.TaoNode) []corev
 				{Name: "chain-data", MountPath: "/data/chain"},
 			},
 			SecurityContext: &corev1.SecurityContext{
-				RunAsUser:                ptr.To(int64(0)), // runs as root to chown
+				RunAsUser:                ptr.To(int64(0)),    // runs as root to chown
+				RunAsNonRoot:             ptr.To(false),       // explicitly override pod-level non-root policy
 				AllowPrivilegeEscalation: ptr.To(false),
 			},
 		},

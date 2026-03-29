@@ -124,6 +124,11 @@ func (r *TaoNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 		return ctrl.Result{}, nil // requeue immediately after update
 	}
+	
+	// Set initial status phase so it appears immediately in kubectl get tn
+	if tn.Status.Phase == "" {
+		tn.Status.Phase = taov1alpha1.PhasePending
+	}
 
 	// ── STEP 3: Ensure owned resources ────────────────────────────────────
 	if err := r.ensureServiceAccount(ctx, &tn); err != nil {

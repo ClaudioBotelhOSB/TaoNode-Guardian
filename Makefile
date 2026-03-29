@@ -31,7 +31,7 @@ install: manifests
 	kubectl apply -f config/crd/bases/
 
 run: generate
-	go run ./cmd/main.go --leader-elect=false --zap-log-level=debug
+	go run ./cmd/main.go --leader-elect=false --enable-webhooks=false --zap-log-level=debug
 
 e2e:
 	kind create cluster --name taonode-e2e || true
