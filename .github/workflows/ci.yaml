@@ -24,11 +24,11 @@ on:
 
 # Minimal top-level permissions; jobs that need more declare their own.
 permissions:
-  contents: read
-  packages: write
-  security-events: write  # Necessário para o upload do Trivy SARIF
-  pull-requests: write    # Necessário para o SonarCloud comentar no PR
-  id-token: write         # Cosign OIDC keyless + SLSA provenance
+  contents: write          # Necessário para actions que criam releases/tags
+  packages: write          # Push de imagens para o GHCR
+  security-events: write   # Upload do Trivy e Checkov SARIF → Security tab
+  pull-requests: write     # SonarCloud comenta nos PRs
+  id-token: write          # Cosign OIDC keyless + SLSA provenance
 
 env:
   REGISTRY: ghcr.io

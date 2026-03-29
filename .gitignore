@@ -2,6 +2,7 @@ docs/*.md
 bin/
 cover.out
 *.tar.gz
+.secrets
 
 # Terraform
 .terraform/
@@ -28,3 +29,4 @@ infra/aws/outputs.tf.bkp
 infra/gcp/bootstrap.sh.bkp
 *.tfplan
 infra/aws/tfplan
+secrets-lint-errors.log

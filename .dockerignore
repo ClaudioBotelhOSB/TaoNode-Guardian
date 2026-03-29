@@ -1,0 +1,69 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# .dockerignore — TaoNode Guardian
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Version control ──────────────────────────────────────────────────────────
+.git/
+.gitignore
+.gitattributes
+
+# ── CI/CD & GitHub ───────────────────────────────────────────────────────────
+.github/
+
+# ── Infrastructure / Terraform ─────────
+infra/
+.terraform/
+**/.terraform/
+**/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# ── Build artefacts ───────────────────────────────────────────────────────────
+bin/
+out/
+dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# ── Test artefacts ────────────────────────────────────────────────────────────
+cover.out
+*.coverprofile
+testdata/
+*_test.go
+
+# ── Local tooling & scripts ───────────────────────────────────────────────────
+hack/
+tools/
+
+# ── GitOps manifests ─────────────────
+argocd/
+config/grafana/
+config/samples/
+
+# ── Documentation ─────────────────────────────────────────────────────────────
+docs/
+*.md
+LICENSE
+
+# ── IDE & OS noise ────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Secrets & local overrides ────────────────────────────────
+*.env
+.env.*
+.secrets
+secrets-lint-errors.log
