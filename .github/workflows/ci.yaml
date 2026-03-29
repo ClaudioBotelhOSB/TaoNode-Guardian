@@ -173,15 +173,14 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Trivy vulnerability scan → SARIF
+      - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.IMAGE }}:scan-${{ github.run_id }}
-          format: sarif
-          output: trivy-results.sarif
-          severity: CRITICAL,HIGH
-          exit-code: '0'   # Não aborta o job; o SARIF é sempre gerado e enviado à aba Security
-          ignore-unfixed: true
+          image-ref: 'ghcr.io/${{ github.repository }}:latest'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0' # Não quebra o build aqui para permitir o upload do relatório
 
       # always() ensures SARIF is uploaded even when Trivy finds vulnerabilities
       # and exits non-zero — results still appear in the Security tab.
