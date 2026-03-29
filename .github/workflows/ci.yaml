@@ -1,5 +1,18 @@
 name: CI
 
+# Unified CI Mega Pipeline — TaoNode Guardian
+# Dependency graph:
+#
+#   lint-and-iac
+#        │
+#       test  ──────────────────────────────────────────────────────────────────
+#        │                                                                      │
+#   security-and-quality  (SonarCloud ← cover.out artifact + Trivy Docker scan)
+#        │
+#   build-and-push  (main only)
+#        ├── sign        (Cosign keyless + Syft SBOM attest)
+#        └── provenance  (SLSA L3 reusable workflow)
+
 on:
   push:
     branches: [main]
@@ -9,11 +22,12 @@ on:
   pull_request:
     branches: [main]
 
+# Minimal top-level permissions; jobs that need more declare their own.
 permissions:
   contents: read
   packages: write
   security-events: write
-  id-token: write # required for Cosign OIDC keyless + SLSA provenance
+  id-token: write # Cosign OIDC keyless + SLSA provenance
 
 env:
   REGISTRY: ghcr.io
@@ -22,9 +36,11 @@ env:
   ENVTEST_K8S_VERSION: '1.31.0'
 
 jobs:
-  # ── 1. LINT (fail-fast, blocks build) ──────────────────────────────────────
-  lint:
-    name: Lint
+  # ── 1. LINT & IaC SECURITY ──────────────────────────────────────────────────
+  # Fail-fast gate: blocks the entire pipeline before any compute-intensive work.
+  # Runs golangci-lint on Go sources and tfsec on the infra/ Terraform tree.
+  lint-and-iac:
+    name: Lint & IaC Scan
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -42,10 +58,24 @@ jobs:
           version: latest
           args: --timeout=5m
 
-  # ── 2. TEST (parallel with lint, envtest binaries cached) ──────────────────
+      # IaC security scan — targets infra/ (Terraform: EC2, VPC, SG, gp3 volume).
+      # soft_fail: true → findings appear as annotations without blocking the gate;
+      # set to false once baseline suppressions are documented in .tfsec/config.yml.
+      - name: IaC Security Scan — tfsec (infra/)
+        uses: aquasecurity/tfsec-action@v1.0.0
+        with:
+          working_directory: infra/
+          soft_fail: true
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── 2. TEST ─────────────────────────────────────────────────────────────────
+  # Runs the full envtest suite exactly once. Uploads cover.out as an artifact
+  # so the downstream security-and-quality job can feed it to SonarCloud without
+  # re-running the suite.
   test:
     name: Test
     runs-on: ubuntu-latest
+    needs: [lint-and-iac]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -56,6 +86,8 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
+      # Cache the envtest binaries keyed by k8s version + go.sum to avoid
+      # downloading ~200 MB of API-server/etcd binaries on every run.
       - name: Cache envtest binaries
         id: envtest-cache
         uses: actions/cache@v4
@@ -73,9 +105,11 @@ jobs:
           setup-envtest use ${{ env.ENVTEST_K8S_VERSION }} --bin-dir /usr/local/bin
           echo "KUBEBUILDER_ASSETS=$(setup-envtest use -i -p path ${{ env.ENVTEST_K8S_VERSION }} --bin-dir /usr/local/bin)" >> $GITHUB_ENV
 
-      - name: Run tests
+      - name: Run tests (make test)
         run: make test
 
+      # Persist cover.out for 7 days — consumed by security-and-quality/SonarCloud.
+      # This is the single source of truth; no job below re-runs the test suite.
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         with:
@@ -83,11 +117,89 @@ jobs:
           path: cover.out
           retention-days: 7
 
-  # ── 3. BUILD & SECURITY (gates on lint + test passing) ─────────────────────
-  build:
-    name: Build & Scan
+  # ── 3. SECURITY & QUALITY ───────────────────────────────────────────────────
+  # Downloads cover.out (from test), submits it to SonarCloud, then builds a
+  # local single-arch image and runs Trivy → SARIF → GitHub Security tab.
+  # Runs on both PRs and main pushes so quality gates fire on every change.
+  security-and-quality:
+    name: Security & Quality
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: [test]
+    steps:
+      # fetch-depth: 0 is mandatory for SonarCloud — shallow clones degrade
+      # new-code detection and blame metadata used for issue assignment.
+      - name: Checkout (full history for SonarCloud)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download coverage artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+          # Downloads to the workspace root, matching where make test wrote it.
+
+      # SonarCloud parameters preserved verbatim from the former sonarcloud.yml.
+      # cover.out is now provided by the artifact rather than a second test run.
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@v5.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=TaoNode-Guardian
+            -Dsonar.organization=botelho-claudiosb
+            -Dsonar.go.coverage.reportPaths=cover.out
+            -Dsonar.sources=.
+            -Dsonar.exclusions=**/*_test.go,**/vendor/**,**/mocks/**,api/**,hack/**,bin/**,config/**,dist/**,docs/**
+            -Dsonar.tests=.
+            -Dsonar.test.inclusions=**/*_test.go
+
+      # ── Docker vulnerability scan ──────────────────────────────────────────
+      # Build a single-arch image locally (load: true, no push) so Trivy can
+      # inspect the final image filesystem. This reuses the GHA layer cache
+      # warmed by any prior build in the same workflow run.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image for Trivy scan (linux/amd64, local only)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.IMAGE }}:scan-${{ github.run_id }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy vulnerability scan → SARIF
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE }}:scan-${{ github.run_id }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+          ignore-unfixed: true
+
+      # always() ensures SARIF is uploaded even when Trivy finds vulnerabilities
+      # and exits non-zero — results still appear in the Security tab.
+      - name: Upload Trivy SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+
+  # ── 4. BUILD & PUSH ─────────────────────────────────────────────────────────
+  # Multi-arch production build — runs only on main branch pushes after the full
+  # quality gate has passed. Outputs the image digest for the downstream
+  # sign and provenance jobs.
+  build-and-push:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    needs: [security-and-quality]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     outputs:
       digest: ${{ steps.push.outputs.digest }}
     steps:
@@ -98,43 +210,13 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Single-arch local build for scanning — runs on both PR and push
-      - name: Build image for scanning (linux/amd64)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64
-          load: true
-          tags: ${{ env.IMAGE }}:scan-${{ github.run_id }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Trivy vulnerability scan (SARIF → Security tab)
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.IMAGE }}:scan-${{ github.run_id }}
-          format: sarif
-          output: trivy-results.sarif
-          severity: CRITICAL,HIGH
-          exit-code: '1'
-          ignore-unfixed: true
-
-      - name: Upload Trivy SARIF to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: trivy-results.sarif
-
-      # Production multi-arch build + push — main branch only
       - name: Extract Docker metadata
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -143,8 +225,10 @@ jobs:
             type=sha,prefix=sha-,format=short
             type=raw,value=latest
 
-      - name: Build and push multi-arch image (amd64 + arm64)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      # The GHA layer cache warmed by security-and-quality's scan build is reused
+      # here — the linux/amd64 layers are already cached, so only arm64 is built
+      # from scratch, keeping the total push time low.
+      - name: Build and push multi-arch image (linux/amd64 + linux/arm64)
         id: push
         uses: docker/build-push-action@v6
         with:
@@ -158,11 +242,13 @@ jobs:
           provenance: true
           sbom: true
 
-  # ── 4. SIGN & ATTEST (main branch only) ────────────────────────────────────
+  # ── 5. SIGN & ATTEST ────────────────────────────────────────────────────────
+  # Cosign OIDC keyless signing (no long-lived key material) + Syft SBOM attest.
+  # Depends on build-and-push so the digest is guaranteed to exist before signing.
   sign:
     name: Sign & Attest
     runs-on: ubuntu-latest
-    needs: [build]
+    needs: [build-and-push]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       packages: write
@@ -174,19 +260,19 @@ jobs:
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Sign image with Cosign (OIDC keyless)
         run: |
           cosign sign --yes \
-            ghcr.io/claudiobotelhosb/taonode-guardian@${{ needs.build.outputs.digest }}
+            ${{ env.IMAGE }}@${{ needs.build-and-push.outputs.digest }}
 
       - name: Generate SBOM with Syft
         uses: anchore/sbom-action@v0
         with:
-          image: ghcr.io/claudiobotelhosb/taonode-guardian@${{ needs.build.outputs.digest }}
+          image: ${{ env.IMAGE }}@${{ needs.build-and-push.outputs.digest }}
           artifact-name: sbom.spdx.json
           output-file: sbom.spdx.json
           format: spdx-json
@@ -196,12 +282,15 @@ jobs:
           cosign attest --yes \
             --predicate sbom.spdx.json \
             --type spdxjson \
-            ghcr.io/claudiobotelhosb/taonode-guardian@${{ needs.build.outputs.digest }}
+            ${{ env.IMAGE }}@${{ needs.build-and-push.outputs.digest }}
 
-  # ── 5. SLSA PROVENANCE L3 (main branch only, reusable workflow) ────────────
+  # ── 6. SLSA PROVENANCE L3 ───────────────────────────────────────────────────
+  # Generates an unforgeable SLSA Level 3 build provenance attestation using the
+  # official slsa-framework reusable workflow. Runs in an isolated ephemeral
+  # environment; the digest from build-and-push is the only input.
   provenance:
     name: SLSA Provenance (L3)
-    needs: [build]
+    needs: [build-and-push]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       actions: read
@@ -210,7 +299,7 @@ jobs:
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.0.0
     with:
       image: ghcr.io/claudiobotelhosb/taonode-guardian
-      digest: ${{ needs.build.outputs.digest }}
+      digest: ${{ needs.build-and-push.outputs.digest }}
       registry-username: ${{ github.actor }}
     secrets:
       registry-password: ${{ secrets.GITHUB_TOKEN }}

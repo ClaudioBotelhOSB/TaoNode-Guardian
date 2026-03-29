@@ -1,0 +1,156 @@
+name: Deploy Infrastructure
+
+# Manual trigger only — no automatic infra changes on git push.
+# Engineers choose the action and cloud provider before pulling the trigger.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Terraform action to execute'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+          - plan      # Preview changes — safe to run at any time, no state mutation
+          - apply     # Create / update resources — requires "production" env approval
+          - destroy   # Tear down ALL resources — requires "production" env approval
+      cloud_provider:
+        description: 'Cloud provider (maps to infra/<provider>/ directory)'
+        required: true
+        default: 'aws'
+        type: choice
+        options:
+          - aws
+
+# Least-privilege: this workflow provisions infra but never writes code.
+permissions:
+  contents: read
+
+# ── Credential & variable injection ────────────────────────────────────────────
+# All sensitive values come exclusively from GitHub Secrets — nothing is
+# hardcoded here. The env block is the single source of injection for the
+# entire job; individual steps add no extra secrets.
+env:
+  # AWS SDK / Terraform AWS provider — standard credential chain.
+  # Required secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+  AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_DEFAULT_REGION:    us-east-1
+
+  # TF_VAR_* variables map 1:1 to var.* declarations in variables.tf.
+  # Both are marked sensitive=true in Terraform and have no default, so they
+  # must be supplied here or the plan/apply will abort immediately.
+  TF_VAR_github_token:   ${{ secrets.PAT_TOKEN }}
+  TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+
+  # CI-mode flags — prevent Terraform from hanging on interactive prompts
+  # inside the non-TTY runner environment.
+  # TF_INPUT=false  → abort with an error instead of waiting for stdin.
+  # TF_IN_AUTOMATION → suppresses "Did you know?" tips and tones down colour
+  #                    output so GHA log rendering stays readable.
+  TF_INPUT:         'false'
+  TF_IN_AUTOMATION: 'true'
+
+jobs:
+  # ── Single job: terraform-deploy ───────────────────────────────────────────
+  terraform-deploy:
+    name: 'Terraform ${{ github.event.inputs.action }} — ${{ github.event.inputs.cloud_provider }}'
+    runs-on: ubuntu-latest
+
+    # Gate destructive actions behind a GitHub Environment with required reviewers.
+    # To activate: Settings → Environments → New environment → "production"
+    #              → Required reviewers → add yourself or the on-call team.
+    # 'plan' evaluates to '' (no environment) and runs without approval, so engineers
+    # can preview changes freely. 'apply' and 'destroy' block until a reviewer approves.
+    environment: >-
+      ${{ (github.event.inputs.action == 'apply' ||
+           github.event.inputs.action == 'destroy') && 'production' || '' }}
+
+    # Set the working directory once at the job level so every run step
+    # automatically executes inside infra/<cloud_provider>/ without repeating
+    # a 'cd' in each step.
+    defaults:
+      run:
+        working-directory: infra/${{ github.event.inputs.cloud_provider }}
+
+    steps:
+      # ── Checkout ────────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Terraform setup ─────────────────────────────────────────────────────
+      # Pinned to the same minor required by main.tf (required_version = ">= 1.9").
+      # The ~1.x range allows automatic patch upgrades while staying on the tested
+      # minor, matching the team's local dev environment.
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '~1.9'
+
+      # ── Init ────────────────────────────────────────────────────────────────
+      # Downloads the AWS provider (~= 5.60) and prepares the local backend.
+      # Using local state for the portfolio cluster; upgrade to S3 backend +
+      # DynamoDB lock table before any multi-engineer shared environment.
+      - name: Terraform Init
+        run: terraform init
+
+      # ── Validate ────────────────────────────────────────────────────────────
+      # Syntax + internal consistency check — runs in under a second, no AWS
+      # API calls. Catches typos before incurring any billable actions.
+      - name: Terraform Validate
+        run: terraform validate
+
+      # ── Dynamic action ──────────────────────────────────────────────────────
+      # Executes plan / apply / destroy based on the workflow_dispatch input.
+      #
+      # admin_cidrs has no default in variables.tf (intentional — forces explicit
+      # intent on every run). Passed inline as a -var flag to keep it visible in
+      # the audit log. For a locked-down environment, replace 0.0.0.0/0 with your
+      # VPN CIDR stored in secrets.ADMIN_CIDRS.
+      #
+      # Quoting note: the -var flag is inlined (not stored in a shell variable) to
+      # avoid bash word-splitting on the JSON list literal ["0.0.0.0/0"]. Single
+      # quotes around the value are preserved by the heredoc and passed verbatim
+      # to the Terraform CLI.
+      - name: 'Terraform ${{ github.event.inputs.action }}'
+        id: tf
+        run: |
+          set -euo pipefail
+
+          case "${{ github.event.inputs.action }}" in
+
+            plan)
+              terraform plan \
+                -var='admin_cidrs=["0.0.0.0/0"]'
+              ;;
+
+            apply)
+              terraform apply -auto-approve \
+                -var='admin_cidrs=["0.0.0.0/0"]'
+              ;;
+
+            destroy)
+              # Surface a visible warning in the GHA log before any deletion.
+              echo "::warning title=DESTRUCTIVE ACTION::Destroying ALL resources in infra/${{ github.event.inputs.cloud_provider }}. Triggered by ${{ github.actor }}."
+              terraform destroy -auto-approve \
+                -var='admin_cidrs=["0.0.0.0/0"]'
+              ;;
+
+            *)
+              echo "::error::Unknown action '${{ github.event.inputs.action }}'" >&2
+              exit 1
+              ;;
+
+          esac
+
+      # ── Outputs (apply only) ─────────────────────────────────────────────────
+      # After a successful apply, print the Terraform outputs (public IP,
+      # SSH command, service tunnel instructions) directly into the GHA job
+      # summary so the engineer doesn't need to run 'terraform output' locally.
+      - name: Show Terraform Outputs
+        if: github.event.inputs.action == 'apply' && steps.tf.outcome == 'success'
+        run: |
+          echo "## Infrastructure Outputs" >> "${GITHUB_STEP_SUMMARY}"
+          echo "\`\`\`" >> "${GITHUB_STEP_SUMMARY}"
+          terraform output >> "${GITHUB_STEP_SUMMARY}"
+          echo "\`\`\`" >> "${GITHUB_STEP_SUMMARY}"
