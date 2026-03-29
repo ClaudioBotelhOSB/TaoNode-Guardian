@@ -31,3 +31,9 @@ variable "admin_cidrs" {
   description = "Trusted CIDRs allowed to reach SSH and the K3s API. Use VPN/office /32s, never 0.0.0.0/0 in production."
   type        = list(string)
 }
+
+variable "github_token" {
+  description = "GitHub Token to clone the repo"
+  type        = string
+  sensitive   = true
+}

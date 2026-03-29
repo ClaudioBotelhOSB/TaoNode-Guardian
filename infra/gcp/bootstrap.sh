@@ -7,7 +7,8 @@ export DEBIAN_FRONTEND=noninteractive
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 export PATH="/usr/local/bin:${PATH}"
 
-REPO_URL="https://github.com/ClaudioBotelhOSB/taonode-guardian.git"
+GITHUB_USER="ClaudioBotelhOSB"
+REPO_URL="https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/${GITHUB_USER}/taonode-guardian.git"
 REPO_DIR="/opt/taonode-guardian"
 STATE_DIR="/var/lib/taonode-guardian"
 

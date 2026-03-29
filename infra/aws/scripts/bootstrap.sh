@@ -7,7 +7,8 @@ export DEBIAN_FRONTEND=noninteractive
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 export PATH="/usr/local/bin:${PATH}"
 
-REPO_URL="https://github.com/ClaudioBotelhOSB/taonode-guardian.git"
+GITHUB_USER="ClaudioBotelhOSB"
+REPO_URL="https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/${GITHUB_USER}/taonode-guardian.git"
 REPO_DIR="/opt/taonode-guardian"
 STATE_DIR="/var/lib/taonode-guardian"
 
@@ -66,9 +67,25 @@ echo 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml' > /etc/profile.d/k3s.sh
 chmod +x /etc/profile.d/k3s.sh
 
 # ── STEP 3: Wait for K3s node Ready ──────────────────────────────────────────
-log "STEP 3: Waiting for K3s node to become Ready"
-kubectl wait nodes --all --for=condition=Ready --timeout=300s
-kubectl get nodes -o wide
+# log "STEP 3: Waiting for K3s node to become Ready"
+# kubectl wait nodes --all --for=condition=Ready --timeout=300s
+# kubectl get nodes -o wide
+log "[$(date +'%Y-%m-%d %H:%M:%S')] [BOOTSTRAP] STEP 3: Waiting for K3s API"
+
+# Aguarda o API Server responder
+until kubectl get nodes &> /dev/null; do
+  sleep 5
+done
+
+# Sleep tático para garantir que o scheduler e os metadados do nó estabilizem
+log "API disponível. Aguardando 15 segundos para estabilização de metadados..."
+sleep 15
+
+log "[$(date +'%Y-%m-%d %H:%M:%S')] [BOOTSTRAP] Node registered! Waiting for Ready state..."
+# Adicionamos um retry no próprio wait para não derrubar o script se o seletor falhar na primeira
+for i in {1..5}; do
+  kubectl wait --for=condition=Ready nodes --all --timeout=60s && break || sleep 10
+done
 
 # ── STEP 4: cert-manager ──────────────────────────────────────────────────────
 log "STEP 4: Installing cert-manager via Helm"
@@ -89,7 +106,7 @@ sleep 20
 # ── STEP 6: ArgoCD ────────────────────────────────────────────────────────────
 log "STEP 6: Installing ArgoCD"
 kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
-kubectl apply -n argocd \
+kubectl apply --server-side -n argocd \
   -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 
 # ── STEP 7: Wait for ArgoCD + patch server to NodePort 30080 ─────────────────
@@ -140,14 +157,25 @@ log "STEP 9: Installing OpenCost"
 chmod +x "${REPO_DIR}/infra/aws/scripts/install-opencost.sh"
 "${REPO_DIR}/infra/aws/scripts/install-opencost.sh"
 
-# ── STEP 10: ClickHouse via Altinity Operator ──────────────────────────────────
+# # ── STEP 10: ClickHouse via Altinity Operator ──────────────────────────────────
 log "STEP 10: Installing Altinity ClickHouse Operator"
 kubectl apply -f \
   https://raw.githubusercontent.com/Altinity/clickhouse-operator/master/deploy/operator/clickhouse-operator-install-bundle.yaml
 
-log "STEP 10: Waiting for clickhouse-operator pod"
+# log "STEP 10: Waiting for clickhouse-operator pod"
+# kubectl wait pods -n kube-system -l app=clickhouse-operator \
+#   --for=condition=Ready --timeout=300s
+
+log "STEP 10: Waiting for clickhouse-operator pod to be scheduled"
+# Loop que aguarda o Kubernetes criar o objeto do Pod no API Server antes de dar o wait
+until [ "$(kubectl get pods -n kube-system -l app=clickhouse-operator --no-headers 2>/dev/null | wc -l)" -gt 0 ]; do
+  sleep 3
+done
+
+log "STEP 10: Pod found! Waiting for Ready state..."
 kubectl wait pods -n kube-system -l app=clickhouse-operator \
   --for=condition=Ready --timeout=300s
+
 
 kubectl create namespace clickhouse --dry-run=client -o yaml | kubectl apply -f -
 
@@ -195,7 +223,13 @@ spec:
               storage: 20Gi
 CHEOF
 
-log "STEP 10: Waiting for ClickHouse pods (image pull may take several minutes)"
+log "STEP 10: Waiting for ClickHouse pods to be scheduled by the Operator..."
+# Loop que aguarda o Operator reagir ao CR e criar os Pods físicos
+until [ "$(kubectl get pods -n clickhouse -l 'clickhouse.altinity.com/chi=taonode' --no-headers 2>/dev/null | wc -l)" -gt 0 ]; do
+  sleep 5
+done
+
+log "STEP 10: ClickHouse Pods found! Waiting for Ready state (image pull may take several minutes)..."
 kubectl wait pods -n clickhouse \
   -l "clickhouse.altinity.com/chi=taonode" \
   --for=condition=Ready --timeout=600s
@@ -232,17 +266,21 @@ OLLAMA_PULL_PID=$!
 log "STEP 12: Applying TaoNode Guardian CRDs"
 kubectl apply -f "${REPO_DIR}/config/crd/bases/"
 
-log "STEP 12: Applying RBAC manifests"
-kubectl apply -f "${REPO_DIR}/config/rbac/"
-
 log "STEP 12: Creating taonode-guardian-system namespace"
 kubectl create namespace taonode-guardian-system \
   --dry-run=client -o yaml | kubectl apply -f -
 
+log "STEP 12: Applying RBAC manifests"
+kubectl apply -k "${REPO_DIR}/config/rbac/"
+
 log "STEP 12: Deploying TaoNode Guardian Operator"
+
+sed -i "s|controller:latest|ghcr.io/claudiobotelhosb/taonode-guardian:latest|g" "${REPO_DIR}/config/manager/manager.yaml"
+
 kubectl apply -n taonode-guardian-system \
   -f "${REPO_DIR}/config/manager/manager.yaml"
 
+log "STEP 12: Waiting for TaoNode Guardian Operator rollout..."
 kubectl rollout status deployment taonode-guardian-controller-manager \
   -n taonode-guardian-system --timeout=300s
 

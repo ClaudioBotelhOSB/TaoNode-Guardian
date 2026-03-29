@@ -7,7 +7,8 @@ export DEBIAN_FRONTEND=noninteractive
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 export PATH="/usr/local/bin:${PATH}"
 
-REPO_URL="https://github.com/ClaudioBotelhOSB/taonode-guardian.git"
+GITHUB_USER="ClaudioBotelhOSB"
+REPO_URL="https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/${GITHUB_USER}/taonode-guardian.git"
 REPO_DIR="/opt/taonode-guardian"
 STATE_DIR="/var/lib/taonode-guardian"
 
@@ -66,9 +67,25 @@ echo 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml' > /etc/profile.d/k3s.sh
 chmod +x /etc/profile.d/k3s.sh
 
 # ── STEP 3: Wait for K3s node Ready ──────────────────────────────────────────
-log "STEP 3: Waiting for K3s node to become Ready"
-kubectl wait nodes --all --for=condition=Ready --timeout=300s
-kubectl get nodes -o wide
+# log "STEP 3: Waiting for K3s node to become Ready"
+# kubectl wait nodes --all --for=condition=Ready --timeout=300s
+# kubectl get nodes -o wide
+log "[$(date +'%Y-%m-%d %H:%M:%S')] [BOOTSTRAP] STEP 3: Waiting for K3s API"
+
+# Aguarda o API Server responder
+until kubectl get nodes &> /dev/null; do
+  sleep 5
+done
+
+# Sleep tático para garantir que o scheduler e os metadados do nó estabilizem
+log "API disponível. Aguardando 15 segundos para estabilização de metadados..."
+sleep 15
+
+log "[$(date +'%Y-%m-%d %H:%M:%S')] [BOOTSTRAP] Node registered! Waiting for Ready state..."
+# Adicionamos um retry no próprio wait para não derrubar o script se o seletor falhar na primeira
+for i in {1..5}; do
+  kubectl wait --for=condition=Ready nodes --all --timeout=60s && break || sleep 10
+done
 
 # ── STEP 4: cert-manager ──────────────────────────────────────────────────────
 log "STEP 4: Installing cert-manager via Helm"
@@ -89,7 +106,7 @@ sleep 20
 # ── STEP 6: ArgoCD ────────────────────────────────────────────────────────────
 log "STEP 6: Installing ArgoCD"
 kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
-kubectl apply -n argocd \
+kubectl apply --server-side -n argocd \
   -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 
 # ── STEP 7: Wait for ArgoCD + patch server to NodePort 30080 ─────────────────
