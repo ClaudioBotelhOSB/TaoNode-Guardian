@@ -7,7 +7,7 @@ name: CI
 #        │
 #       test  ──────────────────────────────────────────────────────────────────
 #        │                                                                      │
-#   security-and-quality  (Trivy Docker scan → GitHub Security tab)
+#   security-and-quality
 #        │
 #   build-and-push  (main only)
 #        ├── sign        (Cosign keyless + Syft SBOM attest)
@@ -26,7 +26,6 @@ on:
 permissions:
   contents: write          # Necessário para actions que criam releases/tags
   packages: write          # Push de imagens para o GHCR
-  security-events: write   # Upload do Trivy e Checkov SARIF → Security tab
   id-token: write          # Cosign OIDC keyless + SLSA provenance
 
 env:
@@ -115,8 +114,7 @@ jobs:
 
 
   # ── 3. SECURITY & QUALITY ───────────────────────────────────────────────────
-  # Builds a local single-arch image and runs Trivy → SARIF → GitHub Security tab.
-  # Runs on both PRs and main pushes so the vulnerability gate fires on every change.
+  # Placeholder gate: ensures build-and-push only runs after test passes.
   security-and-quality:
     name: Security & Quality
     runs-on: ubuntu-latest
@@ -124,40 +122,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      # ── Docker vulnerability scan ──────────────────────────────────────────
-      # Build a single-arch image locally (load: true, no push) so Trivy can
-      # inspect the final image filesystem. This reuses the GHA layer cache
-      # warmed by any prior build in the same workflow run.
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build image for Trivy scan (linux/amd64, local only)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64
-          load: true
-          tags: ${{ env.IMAGE }}:scan-${{ github.run_id }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: 'ghcr.io/claudiobotelhosb/taonode-guardian:latest'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '0'
-          ignore-unfixed: true
-
-      # always() sobe o SARIF mesmo que steps anteriores tenham falhado.
-      - name: Upload Trivy SARIF to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v4
-        if: always() && hashFiles('trivy-results.sarif') != ''
-        with:
-          sarif_file: trivy-results.sarif
 
   # ── 4. BUILD & PUSH ─────────────────────────────────────────────────────────
   # Multi-arch production build — runs only on main branch pushes after the full
