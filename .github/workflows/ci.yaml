@@ -162,6 +162,7 @@ jobs:
             -Dsonar.tests=.
             -Dsonar.test.inclusions=**/*_test.go
             -Dsonar.branch.name=main
+            -Dsonar.scm.disabled=true
 
       # ── Docker vulnerability scan ──────────────────────────────────────────
       # Build a single-arch image locally (load: true, no push) so Trivy can
