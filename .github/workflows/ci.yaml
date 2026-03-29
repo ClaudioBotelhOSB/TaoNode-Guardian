@@ -148,10 +148,10 @@ jobs:
       # SonarCloud parameters preserved verbatim from the former sonarcloud.yml.
       # cover.out is now provided by the artifact rather than a second test run.
       - name: SonarCloud Scan
-        uses: sonarsource/sonarcloud-github-action@master
+        uses: SonarSource/sonarcloud-github-action@master
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }} # Você precisa criar este secret no GitHub!
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
             -Dsonar.projectKey=TaoNode-Guardian
@@ -161,8 +161,6 @@ jobs:
             -Dsonar.exclusions=**/*_test.go,**/vendor/**,**/mocks/**,api/**,hack/**,bin/**,config/**,dist/**,docs/**
             -Dsonar.tests=.
             -Dsonar.test.inclusions=**/*_test.go
-            -Dsonar.branch.name=main
-            -Dsonar.scm.disabled=true
 
       # ── Docker vulnerability scan ──────────────────────────────────────────
       # Build a single-arch image locally (load: true, no push) so Trivy can
