@@ -54,11 +54,12 @@ jobs:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
           args: --timeout=5m
 
-      - name: IaC Security Scan
-        uses: aquasecurity/tfsec-action@v1.0.0
+      - name: IaC Security Scan (Trivy)
+        uses: aquasecurity/trivy-action@master
         with:
-          working_directory: infra/
-          soft_fail: true
+          scan-type: config
+          scan-ref: infra/
+          exit-code: '0'
 
   # ── 2. TEST ────────────────────────────────────────────────────────────────
   test:
@@ -150,6 +151,8 @@ jobs:
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=sha-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}

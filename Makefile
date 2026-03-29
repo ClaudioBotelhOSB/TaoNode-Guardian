@@ -1,6 +1,6 @@
 # Makefile
-IMG ?= ghcr.io/ClaudioBotelhOSB/taonode-guardian:latest
-PROBE_IMG ?= ghcr.io/ClaudioBotelhOSB/taonode-guardian-probe:latest
+IMG ?= ghcr.io/claudiobotelhosb/taonode-guardian:latest
+PROBE_IMG ?= ghcr.io/claudiobotelhosb/taonode-guardian-probe:latest
 
 .PHONY: generate manifests test build docker-build install run lint e2e
 

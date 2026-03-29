@@ -68,6 +68,10 @@ import (
 // scheme is the runtime.Scheme shared by the manager and all reconcilers.
 // Populated in init() before main() runs.
 var (
+	// version is injected at build time via -ldflags "-X main.version=..."
+	// When built without ldflags (e.g. `go run`), it defaults to "dev".
+	version = "dev"
+
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
 )
@@ -266,6 +270,7 @@ func main() {
 
 	// ── Start ────────────────────────────────────────────────────────────────
 	setupLog.Info("Starting TaoNode Guardian",
+		"version", version,
 		"metricsAddr", metricsAddr,
 		"probeAddr", probeAddr,
 		"leaderElect", enableLeaderElect,

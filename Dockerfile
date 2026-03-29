@@ -1,15 +1,16 @@
 # Dockerfile
-# Build stage
-FROM --platform=$BUILDPLATFORM golang:1.23-alpine AS builder
+# Build stage — single-platform linux/amd64
+FROM golang:1.23-alpine AS builder
 RUN apk add --no-cache git ca-certificates
 WORKDIR /workspace
-ARG TARGETOS
-ARG TARGETARCH
+
+ARG VERSION=dev
+
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
-    -ldflags="-s -w" \
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-s -w -X main.version=${VERSION}" \
     -o manager cmd/main.go
 
 # Runtime stage - distroless, non-root, no shell
