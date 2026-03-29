@@ -1,46 +1,36 @@
 name: CI
 
-# Unified CI Mega Pipeline — TaoNode Guardian
-# Dependency graph:
-#
-#   lint-and-iac
-#        │
-#       test  ──────────────────────────────────────────────────────────────────
-#        │                                                                      │
-#   security-and-quality
-#        │
-#   build-and-push  (main only)
-#        ├── sign        (Cosign keyless + Syft SBOM attest)
-#        └── provenance  (SLSA L3 reusable workflow)
-
 on:
   push:
     branches: [main]
     paths-ignore:
-      - '**.md'
+      - '*.md'
+      - '**/*.md'
       - 'docs/**'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '*.md'
+      - '**/*.md'
+      - 'docs/**'
 
-# Minimal top-level permissions; jobs that need more declare their own.
 permissions:
-  contents: write          # Necessário para actions que criam releases/tags
-  packages: write          # Push de imagens para o GHCR
-  id-token: write          # Cosign OIDC keyless + SLSA provenance
+  contents: read
 
 env:
   REGISTRY: ghcr.io
   IMAGE: ghcr.io/claudiobotelhosb/taonode-guardian
-  GO_VERSION: '1.25.x'
+  GO_VERSION: '1.23.0'
+  GOLANGCI_LINT_VERSION: 'v1.61.0'
   ENVTEST_K8S_VERSION: '1.31.0'
+  ENVTEST_BIN_DIR: ${{ github.workspace }}/.cache/kubebuilder-envtest
 
 jobs:
-  # ── 1. LINT & IaC SECURITY ──────────────────────────────────────────────────
-  # Fail-fast gate: blocks the entire pipeline before any compute-intensive work.
-  # Runs golangci-lint on Go sources and tfsec on the infra/ Terraform tree.
   lint-and-iac:
     name: Lint & IaC Scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -54,26 +44,20 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
           args: --timeout=5m
 
-      # IaC security scan — targets infra/ (Terraform: EC2, VPC, SG, gp3 volume).
-      # soft_fail: true → findings appear as annotations without blocking the gate;
-      # set to false once baseline suppressions are documented in .tfsec/config.yml.
-      - name: IaC Security Scan — tfsec (infra/)
+      - name: IaC Security Scan
         uses: aquasecurity/tfsec-action@v1.0.0
         with:
           working_directory: infra/
           soft_fail: true
 
-  # ── 2. TEST ─────────────────────────────────────────────────────────────────
-  # Runs the full envtest suite exactly once. Uploads cover.out as an artifact
-  # so the downstream security-and-quality job can feed it to SonarCloud without
-  # re-running the suite.
   test:
     name: Test
     runs-on: ubuntu-latest
-    needs: [lint-and-iac]
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -84,54 +68,56 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      # Cache the envtest binaries keyed by k8s version + go.sum to avoid
-      # downloading ~200 MB of API-server/etcd binaries on every run.
+      - name: Add Go bin to PATH
+        run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
       - name: Cache envtest binaries
-        id: envtest-cache
         uses: actions/cache@v4
         with:
-          path: /usr/local/kubebuilder
-          key: envtest-${{ env.ENVTEST_K8S_VERSION }}-${{ runner.os }}-${{ hashFiles('go.sum') }}
-          restore-keys: |
-            envtest-${{ env.ENVTEST_K8S_VERSION }}-${{ runner.os }}-
+          path: ${{ env.ENVTEST_BIN_DIR }}
+          key: envtest-${{ runner.os }}-${{ env.ENVTEST_K8S_VERSION }}
 
       - name: Install envtest tools
-        run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
-        env:
-          GOPROXY: "https://proxy.golang.org,direct"
-          # GOTOOLCHAIN=local impede o Go de tentar baixar automaticamente
-          # go1.25.8 quando o go.mod do setup-envtest declara 'toolchain go1.25.x'.
-          # O setup-go já instalou um 1.25.x que satisfaz 'go >= 1.25.0'.
-          GOTOOLCHAIN: "local"
+        run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.19.0
 
-      - name: Provision envtest assets (k8s ${{ env.ENVTEST_K8S_VERSION }})
+      - name: Provision envtest assets
+        shell: bash
         run: |
-          setup-envtest use ${{ env.ENVTEST_K8S_VERSION }} --bin-dir /usr/local/bin
-          echo "KUBEBUILDER_ASSETS=$(setup-envtest use -i -p path ${{ env.ENVTEST_K8S_VERSION }} --bin-dir /usr/local/bin)" >> $GITHUB_ENV
+          mkdir -p "$ENVTEST_BIN_DIR"
+          setup-envtest use "${ENVTEST_K8S_VERSION}" --bin-dir "$ENVTEST_BIN_DIR"
+          ENVTEST_ASSETS="$(setup-envtest use -i -p path "${ENVTEST_K8S_VERSION}" --bin-dir "$ENVTEST_BIN_DIR")"
+          echo "KUBEBUILDER_ASSETS=${ENVTEST_ASSETS}" >> "$GITHUB_ENV"
 
-      - name: Run tests (make test)
-        run: make test
+      - name: Run tests
+        run: go test ./... -coverprofile=cover.out -count=1
 
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cover-out
+          path: cover.out
+          if-no-files-found: error
 
-  # ── 3. SECURITY & QUALITY ───────────────────────────────────────────────────
-  # Placeholder gate: ensures build-and-push only runs after test passes.
   security-and-quality:
     name: Security & Quality
     runs-on: ubuntu-latest
-    needs: [test]
+    needs: [lint-and-iac, test]
+    permissions:
+      contents: read
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Download coverage artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cover-out
+          path: .
 
-  # ── 4. BUILD & PUSH ─────────────────────────────────────────────────────────
-  # Multi-arch production build — runs only on main branch pushes after the full
-  # quality gate has passed. Outputs the image digest for the downstream
-  # sign and provenance jobs.
   build-and-push:
     name: Build & Push
     runs-on: ubuntu-latest
     needs: [security-and-quality]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
     outputs:
       digest: ${{ steps.push.outputs.digest }}
     steps:
@@ -142,6 +128,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -152,37 +139,32 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/claudiobotelhosb/taonode-guardian
+          images: ${{ env.IMAGE }}
           tags: |
             type=sha,prefix=sha-,format=short
-            type=raw,value=latest
+            type=raw,value=latest,enable={{is_default_branch}}
 
-      # The GHA layer cache warmed by security-and-quality's scan build is reused
-      # here — the linux/amd64 layers are already cached, so only arm64 is built
-      # from scratch, keeping the total push time low.
-      - name: Build and push multi-arch image (linux/amd64 + linux/arm64)
+      - name: Build image
         id: push
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ghcr.io/claudiobotelhosb/taonode-guardian:latest
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          provenance: true
-          sbom: true
+          provenance: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          sbom: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
-  # ── 5. SIGN & ATTEST ────────────────────────────────────────────────────────
-  # Cosign OIDC keyless signing (no long-lived key material) + Syft SBOM attest.
-  # Depends on build-and-push so the digest is guaranteed to exist before signing.
   sign:
     name: Sign & Attest
     runs-on: ubuntu-latest
     needs: [build-and-push]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
+      contents: read
       packages: write
       id-token: write
     steps:
@@ -196,10 +178,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Sign image with Cosign (OIDC keyless)
-        run: |
-          cosign sign --yes \
-            ${{ env.IMAGE }}@${{ needs.build-and-push.outputs.digest }}
+      - name: Sign image with Cosign
+        run: cosign sign --yes ${{ env.IMAGE }}@${{ needs.build-and-push.outputs.digest }}
 
       - name: Generate SBOM with Syft
         uses: anchore/sbom-action@v0
@@ -216,10 +196,6 @@ jobs:
             --type spdxjson \
             ${{ env.IMAGE }}@${{ needs.build-and-push.outputs.digest }}
 
-  # ── 6. SLSA PROVENANCE L3 ───────────────────────────────────────────────────
-  # Generates an unforgeable SLSA Level 3 build provenance attestation using the
-  # official slsa-framework reusable workflow. Runs in an isolated ephemeral
-  # environment; the digest from build-and-push is the only input.
   provenance:
     name: SLSA Provenance (L3)
     needs: [build-and-push]
@@ -230,7 +206,7 @@ jobs:
       packages: write
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.0.0
     with:
-      image: ghcr.io/claudiobotelhosb/taonode-guardian
+      image: ${{ env.IMAGE }}
       digest: ${{ needs.build-and-push.outputs.digest }}
       registry-username: ${{ github.actor }}
     secrets:
