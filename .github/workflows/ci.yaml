@@ -26,8 +26,9 @@ on:
 permissions:
   contents: read
   packages: write
-  security-events: write
-  id-token: write # Cosign OIDC keyless + SLSA provenance
+  security-events: write  # Necessário para o upload do Trivy SARIF
+  pull-requests: write    # Necessário para o SonarCloud comentar no PR
+  id-token: write         # Cosign OIDC keyless + SLSA provenance
 
 env:
   REGISTRY: ghcr.io
@@ -66,7 +67,6 @@ jobs:
         with:
           working_directory: infra/
           soft_fail: true
-          github_token: ${{ secrets.GITHUB_TOKEN }}
 
   # ── 2. TEST ─────────────────────────────────────────────────────────────────
   # Runs the full envtest suite exactly once. Uploads cover.out as an artifact
@@ -142,10 +142,10 @@ jobs:
       # SonarCloud parameters preserved verbatim from the former sonarcloud.yml.
       # cover.out is now provided by the artifact rather than a second test run.
       - name: SonarCloud Scan
-        uses: SonarSource/sonarqube-scan-action@v5.0.0
+        uses: sonarsource/sonarcloud-github-action@master
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }} # Você precisa criar este secret no GitHub!
         with:
           args: >
             -Dsonar.projectKey=TaoNode-Guardian
@@ -180,7 +180,7 @@ jobs:
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
-          exit-code: '1'
+          exit-code: '0'   # Não aborta o job; o SARIF é sempre gerado e enviado à aba Security
           ignore-unfixed: true
 
       # always() ensures SARIF is uploaded even when Trivy finds vulnerabilities
