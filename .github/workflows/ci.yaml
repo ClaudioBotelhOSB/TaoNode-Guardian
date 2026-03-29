@@ -1,5 +1,11 @@
 name: CI
 
+# Dependency graph:
+#
+#   lint-and-iac ──┐
+#                  ├── build-and-push ──┬── sign
+#   test ──────────┘   (main only push)  └── provenance
+
 on:
   push:
     branches: [main]
@@ -26,6 +32,7 @@ env:
   ENVTEST_BIN_DIR: ${{ github.workspace }}/.cache/kubebuilder-envtest
 
 jobs:
+  # ── 1. LINT & IaC ──────────────────────────────────────────────────────────
   lint-and-iac:
     name: Lint & IaC Scan
     runs-on: ubuntu-latest
@@ -35,7 +42,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Go ${{ env.GO_VERSION }}
+      - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -53,6 +60,7 @@ jobs:
           working_directory: infra/
           soft_fail: true
 
+  # ── 2. TEST ────────────────────────────────────────────────────────────────
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -62,7 +70,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Go ${{ env.GO_VERSION }}
+      - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -77,8 +85,13 @@ jobs:
           path: ${{ env.ENVTEST_BIN_DIR }}
           key: envtest-${{ runner.os }}-${{ env.ENVTEST_K8S_VERSION }}
 
+      # Versão pinada para evitar que @latest tente baixar um toolchain
+      # mais recente (ex: go1.25.8) e falhe com "GOPROXY has no entries".
       - name: Install envtest tools
         run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.19.0
+        env:
+          GOPROXY: "https://proxy.golang.org,direct"
+          GOTOOLCHAIN: "local"
 
       - name: Provision envtest assets
         shell: bash
@@ -91,30 +104,14 @@ jobs:
       - name: Run tests
         run: go test ./... -coverprofile=cover.out -count=1
 
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: cover-out
-          path: cover.out
-          if-no-files-found: error
-
-  security-and-quality:
-    name: Security & Quality
-    runs-on: ubuntu-latest
-    needs: [lint-and-iac, test]
-    permissions:
-      contents: read
-    steps:
-      - name: Download coverage artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: cover-out
-          path: .
-
+  # ── 3. BUILD & PUSH ────────────────────────────────────────────────────────
+  # Depende diretamente de lint-and-iac e test (sem job de qualidade intermediário).
+  # Build linux/amd64 apenas — arm64 removido para eliminar timeouts do QEMU.
+  # Push e provenance ativados somente em push para main.
   build-and-push:
     name: Build & Push
     runs-on: ubuntu-latest
-    needs: [security-and-quality]
+    needs: [lint-and-iac, test]
     permissions:
       contents: read
       packages: write
@@ -139,7 +136,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.IMAGE }}
+          images: ghcr.io/claudiobotelhosb/taonode-guardian
           tags: |
             type=sha,prefix=sha-,format=short
             type=raw,value=latest,enable={{is_default_branch}}
@@ -149,7 +146,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -158,6 +155,7 @@ jobs:
           provenance: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           sbom: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
+  # ── 4. SIGN & ATTEST ───────────────────────────────────────────────────────
   sign:
     name: Sign & Attest
     runs-on: ubuntu-latest
@@ -196,6 +194,7 @@ jobs:
             --type spdxjson \
             ${{ env.IMAGE }}@${{ needs.build-and-push.outputs.digest }}
 
+  # ── 5. SLSA PROVENANCE (L3) ────────────────────────────────────────────────
   provenance:
     name: SLSA Provenance (L3)
     needs: [build-and-push]
@@ -211,4 +210,3 @@ jobs:
       registry-username: ${{ github.actor }}
     secrets:
       registry-password: ${{ secrets.GITHUB_TOKEN }}
-
