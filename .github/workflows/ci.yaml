@@ -188,7 +188,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.IMAGE }}
+          images: ghcr.io/claudiobotelhosb/taonode-guardian
           tags: |
             type=sha,prefix=sha-,format=short
             type=raw,value=latest
