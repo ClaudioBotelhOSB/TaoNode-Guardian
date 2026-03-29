@@ -83,10 +83,9 @@ jobs:
       # Não possui tags semver — usa pseudo-versões (v0.0.0-*).
       # @latest resolve para o commit mais recente do sub-módulo.
       - name: Install envtest tools
-        run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+        run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.21.0
         env:
           GOPROXY: "https://proxy.golang.org,direct"
-          GOTOOLCHAIN: "local"
 
       - name: Provision envtest assets
         shell: bash
