@@ -30,3 +30,4 @@ infra/gcp/bootstrap.sh.bkp
 *.tfplan
 infra/aws/tfplan
 secrets-lint-errors.log
+go-lint-erros.log
