@@ -161,6 +161,7 @@ jobs:
             -Dsonar.exclusions=**/*_test.go,**/vendor/**,**/mocks/**,api/**,hack/**,bin/**,config/**,dist/**,docs/**
             -Dsonar.tests=.
             -Dsonar.test.inclusions=**/*_test.go
+            -Dsonar.branch.name=main
 
       # ── Docker vulnerability scan ──────────────────────────────────────────
       # Build a single-arch image locally (load: true, no push) so Trivy can
@@ -194,8 +195,8 @@ jobs:
 
       # always() sobe o SARIF mesmo que steps anteriores tenham falhado.
       - name: Upload Trivy SARIF to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        if: always() && hashFiles('trivy-results.sarif') != ''
         with:
           sarif_file: trivy-results.sarif
 
