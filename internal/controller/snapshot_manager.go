@@ -36,11 +36,11 @@ import (
 
 // volumeSnapshotGVR is the GroupVersionResource for the VolumeSnapshot CRD.
 // Using unstructured avoids adding the volumesnapshots API as a dependency.
-var volumeSnapshotGVR = schema.GroupVersionResource{
-	Group:    "snapshot.storage.k8s.io",
-	Version:  "v1",
-	Resource: "volumesnapshots",
-}
+// var volumeSnapshotGVR = schema.GroupVersionResource{
+// 	Group:    "snapshot.storage.k8s.io",
+// 	Version:  "v1",
+// 	Resource: "volumesnapshots",
+// }
 
 // triggerSnapshot creates a VolumeSnapshot for the TaoNode's chain-data PVC.
 //

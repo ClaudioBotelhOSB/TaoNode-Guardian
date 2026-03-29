@@ -42,7 +42,7 @@ const (
 	validatorLeaseDuration = 30 * time.Second
 
 	// validatorLeaseRenewInterval is how often the controller renews the Lease.
-	validatorLeaseRenewInterval = 10 * time.Second
+	// validatorLeaseRenewInterval = 10 * time.Second
 )
 
 // ensureValidatorSingleton enforces that only one validator node runs per subnet
