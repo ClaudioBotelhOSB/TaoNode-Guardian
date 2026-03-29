@@ -205,5 +205,6 @@ jobs:
       image: ghcr.io/claudiobotelhosb/taonode-guardian
       digest: ${{ needs.build-and-push.outputs.digest }}
       registry-username: ${{ github.actor }}
+      private-repository: true
     secrets:
       registry-password: ${{ secrets.GITHUB_TOKEN }}
