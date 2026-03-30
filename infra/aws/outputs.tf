@@ -9,8 +9,8 @@ output "ssh_command" {
 }
 
 output "grafana_url" {
-  description = "URL de acesso direto ao Grafana (NodePort 30030)"
-  value       = "http://${aws_instance.k3s.public_ip}:30030"
+  description = "URL de acesso direto ao Grafana (Klipper LoadBalancer porta 80)"
+  value       = "http://${aws_instance.k3s.public_ip}"
 }
 
 output "argocd_url" {

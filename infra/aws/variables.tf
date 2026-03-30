@@ -40,7 +40,11 @@ variable "ghcr_pat" {
 }
 
 variable "admin_cidrs" {
-  description = "List of CIDR blocks allowed to access administrative ports (SSH, K3s API)."
+  description = "Trusted CIDR blocks allowed to access administrative and demo endpoints."
   type        = list(string)
-  default     = ["0.0.0.0/0"]
+
+  validation {
+    condition     = length(var.admin_cidrs) > 0 && !contains(var.admin_cidrs, "0.0.0.0/0")
+    error_message = "admin_cidrs must contain at least one trusted CIDR and must not include 0.0.0.0/0."
+  }
 }
