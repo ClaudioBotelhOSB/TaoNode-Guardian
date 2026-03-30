@@ -22,7 +22,7 @@ spec:
     # before sync (created by bootstrap.sh or kubectl create secret).
     - repoURL: https://charts.bitnami.com/bitnami
       chart: clickhouse
-      targetRevision: "6.2.13"
+      targetRevision: "9.4.4"
       helm:
         releaseName: clickhouse
         valuesObject:
@@ -31,6 +31,8 @@ spec:
             existingSecretKey: password
           replicaCount: 1
           shards: 1
+          zookeeper:
+            enabled: false
           service:
             type: LoadBalancer
             ports:
