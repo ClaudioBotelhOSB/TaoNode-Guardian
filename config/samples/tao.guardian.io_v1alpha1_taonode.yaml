@@ -27,7 +27,7 @@ spec:
 
   # ── Chain storage ────────────────────────────────────────────────────────────
   chainStorage:
-    storageClass: gp3
+    storageClass: local-path
     size: 500Gi
     autoExpand:
       thresholdPercent: 80
