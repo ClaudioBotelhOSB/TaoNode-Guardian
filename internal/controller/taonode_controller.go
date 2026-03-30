@@ -44,7 +44,9 @@ import (
 	"github.com/ClaudioBotelhOSB/taonode-guardian/internal/analytics"
 )
 
-const finalizerName = "tao.guardian.io/finalizer"
+const (
+	finalizerName = "tao.guardian.io/finalizer"
+)
 
 // TaoNodeReconciler reconciles TaoNode objects.
 // All dependencies are injected at manager setup time in cmd/main.go.

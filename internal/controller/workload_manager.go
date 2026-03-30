@@ -23,13 +23,17 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/util/retry"
 	ptr "k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	taov1alpha1 "github.com/ClaudioBotelhOSB/taonode-guardian/api/v1alpha1"
@@ -54,6 +58,9 @@ func (r *TaoNodeReconciler) ensureServiceAccount(ctx context.Context, tn *taov1a
 // ensureHeadlessService creates the headless Service that provides stable DNS
 // for the StatefulSet pods. The StatefulSet references this Service via
 // spec.serviceName, which enables {pod}.{service}.{namespace}.svc.cluster.local DNS.
+//
+// Note: ws:9945 is removed (Substrate post-v1.0 unified RPC — FIX #2).
+// metrics:9615 is added for Prometheus scraping.
 func (r *TaoNodeReconciler) ensureHeadlessService(ctx context.Context, tn *taov1alpha1.TaoNode) error {
 	svc := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
@@ -63,106 +70,128 @@ func (r *TaoNodeReconciler) ensureHeadlessService(ctx context.Context, tn *taov1
 		},
 	}
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
-		svc.Spec.ClusterIP = "None" // headless
+		svc.Spec.ClusterIP = "None"
 		svc.Spec.Selector = r.labelsForNode(tn)
 		svc.Spec.Ports = []corev1.ServicePort{
 			{Name: "p2p", Port: 30333, Protocol: corev1.ProtocolTCP},
 			{Name: "rpc", Port: 9944, Protocol: corev1.ProtocolTCP},
-			{Name: "ws", Port: 9945, Protocol: corev1.ProtocolTCP},
+			{Name: "metrics", Port: 9615, Protocol: corev1.ProtocolTCP},
 		}
-		svc.Spec.PublishNotReadyAddresses = true // required for StatefulSet bootstrapping
+		svc.Spec.PublishNotReadyAddresses = true
 		return ctrl.SetControllerReference(tn, svc, r.Scheme)
 	})
 	return err
 }
 
-// ensureNodeWorkload creates or updates the TaoNode's StatefulSet.
+// ensureNodeWorkload reconciles the TaoNode StatefulSet.
 //
-// StatefulSet (not a bare Pod) is correct for blockchain nodes because:
-//  1. Stable hostname → peers reconnect after restarts
-//  2. Ordered rollout → validators upgrade one at a time (OnDelete strategy)
-//  3. Stable PVC binding → chain data survives rescheduling
-//  4. Headless Service → direct pod DNS for RPC probes
+// FIX #4: VolumeClaimTemplate drift and structural immutable field changes
+// (serviceName, selector) are handled via orphan-delete-recreate rather than
+// surfacing an error to the caller. If the StatefulSet is already being
+// deleted, the Create is attempted immediately and retried on the next reconcile.
 func (r *TaoNodeReconciler) ensureNodeWorkload(ctx context.Context, tn *taov1alpha1.TaoNode) error {
+	desired, err := r.desiredStatefulSetForNode(tn)
+	if err != nil {
+		return fmt.Errorf("build desired StatefulSet: %w", err)
+	}
+	key := client.ObjectKeyFromObject(desired)
+
+	current := &appsv1.StatefulSet{}
+	if err := r.Get(ctx, key, current); err != nil {
+		if apierrors.IsNotFound(err) {
+			return r.Create(ctx, desired)
+		}
+		return err
+	}
+
+	// FIX #4: orphan-delete + recreate for immutable field changes.
+	if vctDriftDetected(current, desired) || statefulSetStructuralChanges(current, desired) {
+		if current.DeletionTimestamp.IsZero() {
+			orphan := metav1.DeletePropagationOrphan
+			if err := r.Delete(ctx, current, &client.DeleteOptions{PropagationPolicy: &orphan}); err != nil && !apierrors.IsNotFound(err) {
+				return fmt.Errorf("orphan-delete StatefulSet %s: %w", current.Name, err)
+			}
+		}
+		desired.ResourceVersion = ""
+		return r.Create(ctx, desired)
+	}
+
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest := &appsv1.StatefulSet{}
+		if err := r.Get(ctx, key, latest); err != nil {
+			return err
+		}
+		if !statefulSetNeedsMutableUpdate(latest, desired) {
+			return nil
+		}
+		copyMutableStatefulSetFields(latest, desired)
+		return r.Update(ctx, latest)
+	})
+}
+
+func (r *TaoNodeReconciler) desiredStatefulSetForNode(
+	tn *taov1alpha1.TaoNode,
+) (*appsv1.StatefulSet, error) {
+	replicas := int32(1)
+	labels := r.labelsForNode(tn)
+	image := r.imageForNode(tn)
+
+	// FIX #3: resolve canonical --chain value (e.g. "testnet" → "test_finney").
+	chainSpec, needsExternalSpec := ResolveChainSpec(tn.Spec.Network)
+
+	// FIX #2: build CLI args with unified RPC — no deprecated --ws-port.
+	cliArgs := (&SubstrateArgs{
+		ChainSpec:      chainSpec,
+		Role:           string(tn.Spec.Role),
+		RPCPort:        9944,
+		P2PPort:        30333,
+		PrometheusPort: 9615,
+		NodeName:       tn.Name,
+	}).Build()
+
+	nodeResources := tn.Spec.Resources
+	if tn.Spec.GPU != nil {
+		gpuReqs := buildGPUResourceRequirements(tn.Spec.GPU)
+		nodeResources = mergeResourceRequirements(nodeResources, gpuReqs)
+	}
+
+	var affinity *corev1.Affinity
+	if tn.Spec.GPU != nil {
+		nodeAffinity := buildGPUNodeAffinity(tn.Spec.GPU)
+		if nodeAffinity != nil {
+			affinity = &corev1.Affinity{NodeAffinity: nodeAffinity}
+		}
+	}
+
+	tolerations := append([]corev1.Toleration{}, tn.Spec.Tolerations...)
+	tolerations = append(tolerations, buildGPUTolerations(tn.Spec.GPU)...)
+
+	// Annotate pod template with a hash of CLI args so that argument changes
+	// trigger rolling updates even when no other StatefulSet field changed.
+	annotations := r.annotationsForNode(tn)
+	annotations["tao.guardian.io/args-hash"] = hashArgs(cliArgs)
+
 	sts := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      tn.Name,
 			Namespace: tn.Namespace,
+			Labels:    labels,
 		},
-	}
-
-	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, sts, func() error {
-		replicas := int32(1)
-		sts.Labels = r.labelsForNode(tn)
-		sts.Spec.Replicas = &replicas
-		sts.Spec.ServiceName = tn.Name + "-headless"
-		sts.Spec.Selector = &metav1.LabelSelector{
-			MatchLabels: r.labelsForNode(tn),
-		}
-
-		// Validators use OnDelete — human must explicitly trigger pod deletion to
-		// apply an update. This prevents accidental double-signing during upgrades.
-		if tn.Spec.Role == taov1alpha1.RoleValidator {
-			sts.Spec.UpdateStrategy = appsv1.StatefulSetUpdateStrategy{
-				Type: appsv1.OnDeleteStatefulSetStrategyType,
-			}
-		} else {
-			sts.Spec.UpdateStrategy = appsv1.StatefulSetUpdateStrategy{
-				Type: appsv1.RollingUpdateStatefulSetStrategyType,
-			}
-		}
-
-		// Build affinity for GPU nodes if GPU is requested.
-		var affinity *corev1.Affinity
-		if tn.Spec.GPU != nil {
-			nodeAffinity := buildGPUNodeAffinity(tn.Spec.GPU)
-			if nodeAffinity != nil {
-				affinity = &corev1.Affinity{NodeAffinity: nodeAffinity}
-			}
-		}
-
-		// Merge user tolerations with GPU tolerations.
-		tolerations := append(tn.Spec.Tolerations, buildGPUTolerations(tn.Spec.GPU)...)
-
-		sts.Spec.Template = corev1.PodTemplateSpec{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels:      r.labelsForNode(tn),
-				Annotations: r.annotationsForNode(tn),
+		Spec: appsv1.StatefulSetSpec{
+			Replicas:    &replicas,
+			ServiceName: tn.Name + "-headless",
+			Selector: &metav1.LabelSelector{
+				MatchLabels: labels,
 			},
-			Spec: corev1.PodSpec{
-				SecurityContext: &corev1.PodSecurityContext{
-					RunAsNonRoot: ptr.To(true),
-					RunAsUser:    ptr.To(int64(1000)),
-					FSGroup:      ptr.To(int64(1000)),
-					SeccompProfile: &corev1.SeccompProfile{
-						Type: corev1.SeccompProfileTypeRuntimeDefault,
-					},
-				},
-				ServiceAccountName:            tn.Name + "-sa",
-				TerminationGracePeriodSeconds: ptr.To(int64(120)), // chain nodes need time to flush
-				InitContainers:                r.buildInitContainers(tn),
-				Containers:                    r.buildContainers(tn),
-				Volumes:                       r.buildVolumes(tn),
-				Tolerations:                   tolerations,
-				NodeSelector:                  tn.Spec.NodeSelector,
-				Affinity:                      affinity,
-			},
-		}
-
-		// VolumeClaimTemplate is immutable after StatefulSet creation — only set
-		// it when the StatefulSet is being created for the first time (empty slice).
-		// Subsequent reconciles must leave this field untouched to avoid the
-		// "Forbidden: updates to statefulset spec for fields other than..." error.
-		if len(sts.Spec.VolumeClaimTemplates) == 0 {
-			sts.Spec.VolumeClaimTemplates = []corev1.PersistentVolumeClaim{
+			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:   "chain-data",
-						Labels: r.labelsForNode(tn),
+						Name:   chainDataVolume,
+						Labels: labels,
 					},
 					Spec: corev1.PersistentVolumeClaimSpec{
 						AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
-						StorageClassName: &tn.Spec.ChainStorage.StorageClass,
+						StorageClassName: ptr.To(tn.Spec.ChainStorage.StorageClass),
 						Resources: corev1.VolumeResourceRequirements{
 							Requests: corev1.ResourceList{
 								corev1.ResourceStorage: tn.Spec.ChainStorage.Size,
@@ -170,78 +199,90 @@ func (r *TaoNodeReconciler) ensureNodeWorkload(ctx context.Context, tn *taov1alp
 						},
 					},
 				},
-			}
-		}
+			},
+		},
+	}
 
-		return ctrl.SetControllerReference(tn, sts, r.Scheme)
-	})
-	return err
+	if tn.Spec.Role == taov1alpha1.RoleValidator {
+		sts.Spec.UpdateStrategy = appsv1.StatefulSetUpdateStrategy{
+			Type: appsv1.OnDeleteStatefulSetStrategyType,
+		}
+	} else {
+		sts.Spec.UpdateStrategy = appsv1.StatefulSetUpdateStrategy{
+			Type: appsv1.RollingUpdateStatefulSetStrategyType,
+		}
+	}
+
+	sts.Spec.Template = corev1.PodTemplateSpec{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels:      labels,
+			Annotations: annotations,
+		},
+		Spec: corev1.PodSpec{
+			SecurityContext: &corev1.PodSecurityContext{
+				RunAsNonRoot:        ptr.To(true),
+				RunAsUser:           ptr.To(subtensorUID),
+				FSGroup:             ptr.To(subtensorGID),
+				FSGroupChangePolicy: ptrFSGroupChangePolicy(corev1.FSGroupChangeOnRootMismatch),
+				SeccompProfile: &corev1.SeccompProfile{
+					Type: corev1.SeccompProfileTypeRuntimeDefault,
+				},
+			},
+			ServiceAccountName:            tn.Name + "-sa",
+			TerminationGracePeriodSeconds: ptr.To(int64(120)),
+			// FIX #1: init container pre-chowns /data so main container needs zero caps.
+			InitContainers: []corev1.Container{buildInitContainer(image)},
+			Containers:     r.buildContainers(tn, image, nodeResources, cliArgs, needsExternalSpec),
+			Volumes:        r.buildVolumes(tn, needsExternalSpec),
+			Tolerations:    tolerations,
+			NodeSelector:   tn.Spec.NodeSelector,
+			Affinity:       affinity,
+		},
+	}
+
+	if err := ctrl.SetControllerReference(tn, sts, r.Scheme); err != nil {
+		return nil, err
+	}
+	return sts, nil
+}
+
+// statefulSetStructuralChanges returns true if serviceName or selector changed.
+// Both fields are immutable; changes require orphan-delete-recreate (FIX #4).
+func statefulSetStructuralChanges(current, desired *appsv1.StatefulSet) bool {
+	return current.Spec.ServiceName != desired.Spec.ServiceName ||
+		!equality.Semantic.DeepEqual(current.Spec.Selector, desired.Spec.Selector)
+}
+
+func statefulSetNeedsMutableUpdate(current, desired *appsv1.StatefulSet) bool {
+	return !equality.Semantic.DeepEqual(current.Labels, desired.Labels) ||
+		!equality.Semantic.DeepEqual(current.Spec.Replicas, desired.Spec.Replicas) ||
+		!equality.Semantic.DeepEqual(current.Spec.UpdateStrategy, desired.Spec.UpdateStrategy) ||
+		!equality.Semantic.DeepEqual(current.Spec.Template, desired.Spec.Template)
+}
+
+func copyMutableStatefulSetFields(dst, src *appsv1.StatefulSet) {
+	dst.Labels = src.Labels
+	dst.Spec.Replicas = src.Spec.Replicas
+	dst.Spec.UpdateStrategy = src.Spec.UpdateStrategy
+	dst.Spec.Template = src.Spec.Template
 }
 
 // buildContainers returns the container list for the TaoNode pod:
-//  1. Main node container (subtensor/miner/validator binary)
-//  2. chain-probe sidecar (exposes :9616/health for probeChainHealth)
-//  3. metrics sidecar (optional, when monitoring is enabled)
-func (r *TaoNodeReconciler) buildContainers(tn *taov1alpha1.TaoNode) []corev1.Container {
-	// Merge user resources with GPU resources.
-	nodeResources := tn.Spec.Resources
-	if tn.Spec.GPU != nil {
-		gpuReqs := buildGPUResourceRequirements(tn.Spec.GPU)
-		nodeResources = mergeResourceRequirements(nodeResources, gpuReqs)
-	}
-
+//  1. Main node container — built by buildMainContainer (FIX #1 + #2 + #3)
+//  2. chain-probe sidecar — exposes :9616/health for probeChainHealth
+//  3. metrics sidecar — optional, when monitoring is enabled
+func (r *TaoNodeReconciler) buildContainers(
+	tn *taov1alpha1.TaoNode,
+	image string,
+	resources corev1.ResourceRequirements,
+	cliArgs []string,
+	needsExternalSpec bool,
+) []corev1.Container {
 	containers := []corev1.Container{
-		{
-			Name:  "node",
-			Image: r.imageForNode(tn),
-			Args:  buildNodeArgs(tn),
-			Ports: []corev1.ContainerPort{
-				{Name: "p2p", ContainerPort: 30333, Protocol: corev1.ProtocolTCP},
-				{Name: "rpc", ContainerPort: 9944, Protocol: corev1.ProtocolTCP},
-				{Name: "ws", ContainerPort: 9945, Protocol: corev1.ProtocolTCP},
-			},
-			Resources: nodeResources,
-			VolumeMounts: []corev1.VolumeMount{
-				{Name: "chain-data", MountPath: "/data/chain"},
-			},
-			SecurityContext: &corev1.SecurityContext{
-				AllowPrivilegeEscalation: ptr.To(false),
-				ReadOnlyRootFilesystem:   ptr.To(false), // chain node writes to /data
-				Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
-			},
-			// Liveness: restarts if RPC stops responding entirely.
-			LivenessProbe: &corev1.Probe{
-				ProbeHandler: corev1.ProbeHandler{
-					HTTPGet: &corev1.HTTPGetAction{
-						Path: "/health",
-						Port: intstr.FromInt32(9944),
-					},
-				},
-				InitialDelaySeconds: 120, // chain nodes are slow to start
-				PeriodSeconds:       30,
-				TimeoutSeconds:      10,
-				FailureThreshold:    5, // tolerate temporary RPC hangs
-			},
-			// Readiness: removed from Service endpoints when stuck.
-			ReadinessProbe: &corev1.Probe{
-				ProbeHandler: corev1.ProbeHandler{
-					HTTPGet: &corev1.HTTPGetAction{
-						Path: "/health",
-						Port: intstr.FromInt32(9944),
-					},
-				},
-				InitialDelaySeconds: 30,
-				PeriodSeconds:       15,
-				TimeoutSeconds:      5,
-				FailureThreshold:    3,
-			},
-		},
-		// chain-probe sidecar: lightweight Go binary that translates
-		// Subtensor JSON-RPC calls into a structured GET /health JSON response.
-		// The controller's probeChainHealth() calls this, not the node RPC directly.
+		buildMainContainer(image, resources, cliArgs, needsExternalSpec),
 		{
 			Name:  "chain-probe",
-			Image: "ghcr.io/ClaudioBotelhOSB/taonode-guardian-probe:latest",
+			Image: "ghcr.io/claudiobotelhosb/taonode-guardian-probe:latest",
 			Ports: []corev1.ContainerPort{
 				{Name: "probe", ContainerPort: chainProbePort, Protocol: corev1.ProtocolTCP},
 			},
@@ -277,7 +318,6 @@ func (r *TaoNodeReconciler) buildContainers(tn *taov1alpha1.TaoNode) []corev1.Co
 		},
 	}
 
-	// Optional metrics sidecar (Prometheus node-exporter style).
 	if tn.Spec.Monitoring != nil && tn.Spec.Monitoring.Enabled {
 		containers = append(containers, r.buildMetricsSidecar(tn))
 	}
@@ -285,51 +325,39 @@ func (r *TaoNodeReconciler) buildContainers(tn *taov1alpha1.TaoNode) []corev1.Co
 	return containers
 }
 
-// buildInitContainers returns init containers for the TaoNode pod.
-// Currently: a data-permission-fix container that ensures /data/chain is
-// writable by the non-root user (uid 1000).
-func (r *TaoNodeReconciler) buildInitContainers(tn *taov1alpha1.TaoNode) []corev1.Container {
-	return []corev1.Container{
-		{
-			Name:  "init-chain-data",
-			Image: "busybox:1.36",
-			Command: []string{
-				"sh", "-c",
-				"chown -R 1000:1000 /data/chain && chmod 750 /data/chain",
-			},
-			VolumeMounts: []corev1.VolumeMount{
-				{Name: "chain-data", MountPath: "/data/chain"},
-			},
-			SecurityContext: &corev1.SecurityContext{
-				RunAsUser:                ptr.To(int64(0)),    // runs as root to chown
-				RunAsNonRoot:             ptr.To(false),       // explicitly override pod-level non-root policy
-				AllowPrivilegeEscalation: ptr.To(false),
-			},
-		},
-	}
-}
-
 // buildVolumes returns extra volumes for the TaoNode pod.
 // The chain-data volume comes from the VolumeClaimTemplate, not listed here.
-func (r *TaoNodeReconciler) buildVolumes(tn *taov1alpha1.TaoNode) []corev1.Volume {
+func (r *TaoNodeReconciler) buildVolumes(tn *taov1alpha1.TaoNode, needsExternalSpec bool) []corev1.Volume {
 	volumes := []corev1.Volume{
-		// Temp directory for the chain-probe sidecar (read-only root filesystem).
 		{
-			Name: "probe-tmp",
-			VolumeSource: corev1.VolumeSource{
-				EmptyDir: &corev1.EmptyDirVolumeSource{},
-			},
+			Name:         "probe-tmp",
+			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 		},
 	}
 
-	// Mount validator hotkey secret if configured.
+	// FIX #3: for unknown networks the caller must create a ConfigMap named
+	// <taonode-name>-chainspec with key raw_spec.json. The main container
+	// mounts it read-only at /data/chain-spec/ (see buildMainContainer).
+	if needsExternalSpec {
+		volumes = append(volumes, corev1.Volume{
+			Name: "chain-spec",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: tn.Name + "-chainspec",
+					},
+				},
+			},
+		})
+	}
+
 	if tn.Spec.Validator != nil && tn.Spec.Validator.HotKeySecret != "" {
 		volumes = append(volumes, corev1.Volume{
 			Name: "validator-hotkey",
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
 					SecretName:  tn.Spec.Validator.HotKeySecret,
-					DefaultMode: ptr.To(int32(0400)), // read-only, owner only
+					DefaultMode: ptr.To(int32(0400)),
 				},
 			},
 		})
@@ -373,32 +401,6 @@ func (r *TaoNodeReconciler) buildMetricsSidecar(tn *taov1alpha1.TaoNode) corev1.
 			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 		},
 	}
-}
-
-// buildNodeArgs constructs the command-line arguments for the Subtensor binary
-// based on the TaoNode spec.
-func buildNodeArgs(tn *taov1alpha1.TaoNode) []string {
-	args := []string{
-		"--base-path=/data/chain",
-		"--rpc-port=9944",
-		"--ws-port=9945",
-		"--port=30333",
-	}
-
-	switch tn.Spec.Network {
-	case "mainnet":
-		args = append(args, "--chain=finney")
-	case "testnet":
-		args = append(args, "--chain=test")
-	case "devnet":
-		args = append(args, "--chain=local", "--dev")
-	}
-
-	if tn.Spec.Role == taov1alpha1.RoleValidator {
-		args = append(args, "--validator")
-	}
-
-	return args
 }
 
 // ensureServiceMonitor creates a Prometheus ServiceMonitor for the TaoNode
