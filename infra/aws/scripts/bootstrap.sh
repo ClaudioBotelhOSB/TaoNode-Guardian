@@ -82,11 +82,10 @@ else
   git clone --depth=1 "${REPO_URL}" "${REPO_DIR}"
 fi
 
-# ── STEP 2: K3s (no traefik, no servicelb) ───────────────────────────────────
+# ── STEP 2: K3s (no traefik — Klipper servicelb enabled for LoadBalancer) ────
 log "STEP 2: Installing K3s"
 curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server \
   --disable traefik \
-  --disable servicelb \
   --write-kubeconfig-mode 644" sh -
 
 # Persist KUBECONFIG for interactive SSH sessions
@@ -241,10 +240,12 @@ log ""
 log "  Grafana admin password:"
 log "    cat /var/lib/taonode-guardian/grafana-admin-password"
 log ""
-log "  SSH tunnels (one per terminal tab):"
-log "    ssh -N -L 30030:localhost:30030 ubuntu@${PUBLIC_IP}  # Grafana  → http://localhost:30030"
-log "    ssh -N -L 30080:localhost:30080 ubuntu@${PUBLIC_IP}  # ArgoCD   → https://localhost:30080"
-log "    ssh -N -L 9090:localhost:9090   ubuntu@${PUBLIC_IP}  # Kubecost → http://localhost:9090 (port-forward manually)"
+log "  Access URLs (Klipper LoadBalancer — run open-demo-ports.sh first):"
+log "    Grafana   → http://${PUBLIC_IP}:80"
+log "    ClickHouse HTTP  → http://${PUBLIC_IP}:8123/play"
+log "    ClickHouse Native → ${PUBLIC_IP}:9000"
+log "  ArgoCD SSH tunnel:"
+log "    ssh -N -L 30080:localhost:30080 ubuntu@${PUBLIC_IP}  # ArgoCD → https://localhost:30080"
 log ""
 log "  Watch ArgoCD sync:"
 log "    kubectl get applications -n argocd -w"

@@ -80,7 +80,6 @@ resource "aws_route_table_association" "public" {
 }
 
 # ── Security Group ────────────────────────────────────────────────────────────
-# All 9 ingress rules match the live AWS SG + Kubecost (9090).
 
 resource "aws_security_group" "k3s" {
   name        = "taonode-guardian-k3s-sg"
@@ -152,11 +151,19 @@ resource "aws_security_group" "k3s" {
   }
 
   ingress {
-    description = "Grafana NodePort"
-    from_port   = 30030
-    to_port     = 30030
+    description = "ClickHouse HTTP (admin only)"
+    from_port   = 8123
+    to_port     = 8123
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = var.admin_cidrs
+  }
+
+  ingress {
+    description = "ClickHouse Native (admin only)"
+    from_port   = 9000
+    to_port     = 9000
+    protocol    = "tcp"
+    cidr_blocks = var.admin_cidrs
   }
 
   egress {
