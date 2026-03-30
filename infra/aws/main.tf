@@ -84,7 +84,7 @@ resource "aws_route_table_association" "public" {
 
 resource "aws_security_group" "k3s" {
   name        = "taonode-guardian-k3s-sg"
-  description = "K3s single-node — SSH, HTTP/S, K3s API, Grafana, ArgoCD, Kubecost."
+  description = "K3s single-node - SSH, HTTP, HTTPS, K3s API, Grafana, ArgoCD, Kubecost."
   vpc_id      = aws_vpc.k3s.id
 
   ingress {
@@ -92,7 +92,7 @@ resource "aws_security_group" "k3s" {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = var.admin_cidrs
   }
 
   ingress {
@@ -132,7 +132,7 @@ resource "aws_security_group" "k3s" {
     from_port   = 6443
     to_port     = 6443
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = var.admin_cidrs
   }
 
   ingress {

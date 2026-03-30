@@ -38,3 +38,9 @@ variable "ghcr_pat" {
   type        = string
   sensitive   = true
 }
+
+variable "admin_cidrs" {
+  description = "List of CIDR blocks allowed to access administrative ports (SSH, K3s API)."
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}

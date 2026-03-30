@@ -8,6 +8,7 @@ ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMw7TPY4xostLb4DwenoTPH5fV
 instance_type  = "t3.medium"
 use_spot       = true
 spot_price     = "0.03"
+admin_cidrs    = ["0.0.0.0/0"] # Restrict to your IP/VPN in production
 
 # GitHub PAT — 'Contents: Read' scope — for cloning the repo during bootstrap.
 # github_token = "github_pat_..."

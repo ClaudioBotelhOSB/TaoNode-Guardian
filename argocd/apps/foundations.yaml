@@ -67,34 +67,11 @@ spec:
           alertmanager:
             enabled: true
 
-    # ── ClickHouseInstallation CR (managed by Altinity operator) ─────────────
-    # The Altinity operator itself is installed once via bootstrap.sh (kubectl apply).
-    # ArgoCD manages only the ClickHouseInstallation CR and related config in Git.
-    - repoURL: https://github.com/ClaudioBotelhOSB/taonode-guardian
-      targetRevision: HEAD
-      path: config/clickhouse
-
-    # ── Ollama (CPU inference — no GPU required for t3.2xlarge) ──────────────
-    - repoURL: https://otwld.github.io/ollama-helm/
-      chart: ollama
-      targetRevision: "0.72.0"
-      helm:
-        releaseName: ollama
-        valuesObject:
-          ollama:
-            gpu:
-              enabled: false
-            models:
-              - llama3.1:8b-instruct-q4_K_M
-          service:
-            type: ClusterIP
-          resources:
-            requests:
-              cpu: "1"
-              memory: 4Gi
-            limits:
-              cpu: "4"
-              memory: 16Gi
+    # ── Ollama — disabled on t3.medium (4 GB RAM insuficiente) ─────────────────
+    # Re-habilitar ao migrar para instancia com >= 16 GB RAM (ex: t3.2xlarge).
+    # - repoURL: https://otwld.github.io/ollama-helm/
+    #   chart: ollama
+    #   targetRevision: "0.72.0"
 
   # ── Destination ───────────────────────────────────────────────────────────
   destination:
