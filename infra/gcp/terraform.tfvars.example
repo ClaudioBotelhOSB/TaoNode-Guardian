@@ -1,0 +1,23 @@
+# --- TaoNode Guardian --- GCP Terraform Variables -----------------------------
+# Copy this file to terraform.tfvars and fill in the values.
+# DO NOT commit this file with real token values.
+# Add to .gitignore: terraform.tfvars  (or use *.tfvars)
+
+project_id     = "my-gcp-project-id"
+region         = "us-east1"
+zone           = "us-east1-b"
+ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMw7TPY4xostLb4DwenoTPH5fV+MsBJW6XiVRYaPTnXt taonode-demo"
+machine_type   = "n2-standard-4"
+use_spot       = false   # true economiza ~60-80% mas Spot e interrompido com 30 s de aviso
+
+# Aberto para todos (demo publico --- compartilhavel com o time):
+admin_cidrs = ["0.0.0.0/0"]
+# Restrito ao seu IP (producao/staging):
+# admin_cidrs = ["203.0.113.10/32"]   # curl -s https://checkip.amazonaws.com
+
+# GitHub PAT --- 'Contents: Read' scope --- for cloning the repo during bootstrap.
+# github_token = "github_pat_..."
+
+# GitHub PAT --- 'read:packages' scope --- for pulling the container image from ghcr.io.
+# Required to create the imagePullSecret 'ghcr-login-secret' in taonode-guardian-system.
+# ghcr_pat = "github_pat_..."
