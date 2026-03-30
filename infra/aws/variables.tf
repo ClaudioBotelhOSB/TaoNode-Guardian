@@ -10,9 +10,9 @@ variable "ssh_public_key" {
 }
 
 variable "instance_type" {
-  description = "EC2 instance type. t3.medium (2 vCPU / 4 GB RAM) for lightweight K3s single-node with ArgoCD, Grafana and Kubecost."
+  description = "EC2 instance type. t3.xlarge (4 vCPU / 16 GB RAM) for K3s single-node with ArgoCD, Grafana, ClickHouse, Kubecost and TaoNode Operator."
   type        = string
-  default     = "t3.medium"
+  default     = "t3.xlarge"
 }
 
 variable "use_spot" {
@@ -40,11 +40,12 @@ variable "ghcr_pat" {
 }
 
 variable "admin_cidrs" {
-  description = "Trusted CIDR blocks allowed to access administrative and demo endpoints."
+  description = "CIDR blocks allowed to access all ports. Use [\"0.0.0.0/0\"] for public demo access."
   type        = list(string)
+  default     = ["0.0.0.0/0"]
 
   validation {
-    condition     = length(var.admin_cidrs) > 0 && !contains(var.admin_cidrs, "0.0.0.0/0")
-    error_message = "admin_cidrs must contain at least one trusted CIDR and must not include 0.0.0.0/0."
+    condition     = length(var.admin_cidrs) > 0
+    error_message = "admin_cidrs must contain at least one CIDR."
   }
 }
