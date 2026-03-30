@@ -1,0 +1,20 @@
+# Service that exposes the controller-manager metrics port (8080/HTTP)
+# so that the Prometheus ServiceMonitor can discover and scrape it.
+# The label `control-plane: controller-manager` is matched by the ServiceMonitor
+# selector in argocd/monitors/taonode-guardian-servicemonitor.yaml.
+apiVersion: v1
+kind: Service
+metadata:
+  name: taonode-guardian-controller-manager-metrics
+  namespace: taonode-guardian-system
+  labels:
+    app.kubernetes.io/name: taonode-guardian
+    control-plane: controller-manager
+spec:
+  selector:
+    control-plane: controller-manager
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: metrics
+      protocol: TCP

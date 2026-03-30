@@ -1,0 +1,24 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: taonode-guardian-controller-manager
+  namespace: taonode-guardian-system
+  labels:
+    # This label must match the kube-prometheus-stack serviceMonitorSelector.
+    # The default selector matches: release=kube-prometheus-stack
+    release: kube-prometheus-stack
+    app.kubernetes.io/name: taonode-guardian
+    app.kubernetes.io/part-of: taonode-guardian
+spec:
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+  namespaceSelector:
+    matchNames:
+      - taonode-guardian-system
+  endpoints:
+    - port: metrics          # Named port on the manager Service (port 8080)
+      path: /metrics
+      scheme: http
+      interval: 30s
+      scrapeTimeout: 10s

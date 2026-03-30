@@ -1,7 +1,22 @@
 #!/bin/bash
-# TaoNode Guardian — K3s bootstrap script
-# Runs as root via EC2 user_data / cloud-init on first boot.
-# Output is captured automatically in /var/log/cloud-init-output.log
+# =============================================================================
+# TaoNode Guardian — K3s Bootstrap Script
+# =============================================================================
+# Executed as root via EC2 user_data / cloud-init on first boot.
+# Output: /var/log/cloud-init-output.log
+#
+# DESIGN PRINCIPLE — "Bootstrap installs the plane; ArgoCD owns the apps"
+# ─────────────────────────────────────────────────────────────────────────────
+# This script does exactly FOUR things then exits:
+#   1. Install K3s + tooling (helm, kustomize)
+#   2. Install cert-manager (ArgoCD depends on it for webhooks)
+#   3. Install ArgoCD
+#   4. Create mandatory pre-ArgoCD secrets (ghcr-login-secret, grafana password,
+#      clickhouse credentials) and apply the Root App-of-Apps
+#
+# Everything else (Prometheus, Kubecost, Ollama, ClickHouse, TaoNode Operator,
+# TaoNode CRs) is reconciled by ArgoCD from the Git repository.
+# =============================================================================
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
@@ -12,13 +27,22 @@ REPO_URL="https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/${GITHUB_USER}/taono
 REPO_DIR="/opt/taonode-guardian"
 STATE_DIR="/var/lib/taonode-guardian"
 
-log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [BOOTSTRAP] $*"; }
+# GHCR_PAT is injected by Terraform via user_data templating.
+# It must have `read:packages` scope to pull ghcr.io/claudiobotelhosb/taonode-guardian:latest
+GHCR_USER="claudiobotelhosb"   # lowercase — required by ghcr.io
+GHCR_EMAIL="botelho.claudiosb@gmail.com"
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+log()  { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [BOOTSTRAP] $*"; }
+
 wait_ready() {
   local ns="$1"; shift
-  log "Waiting for pods in namespace '${ns}' to be Ready..."
+  log "Waiting for all pods in '${ns}' to be Ready (timeout 10m)..."
   kubectl wait pods -n "${ns}" --all --for=condition=Ready --timeout=600s
 }
+
 rand_secret() { head -c 32 /dev/urandom | base64 | tr -d '\n'; }
+
 ensure_secret_file() {
   local path="$1"
   if [ ! -s "${path}" ]; then
@@ -28,7 +52,7 @@ ensure_secret_file() {
   chmod 600 "${path}"
 }
 
-# ── STEP 1: System dependencies, tooling, and repo clone ─────────────────────
+# ── STEP 1: System dependencies ──────────────────────────────────────────────
 log "STEP 1: Installing system dependencies"
 apt-get update -y
 apt-get install -y curl wget git jq ca-certificates apt-transport-https gnupg
@@ -36,19 +60,22 @@ apt-get install -y curl wget git jq ca-certificates apt-transport-https gnupg
 log "STEP 1: Installing Helm"
 curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
-log "STEP 1: Installing kustomize"
+log "STEP 1: Installing kustomize v5.4.2"
 KUSTOMIZE_VERSION="5.4.2"
-curl -fsSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" \
+curl -fsSL \
+  "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" \
   | tar -xz -C /usr/local/bin kustomize
 chmod +x /usr/local/bin/kustomize
 
-log "STEP 1: Cloning repository to ${REPO_DIR}"
+log "STEP 1: Pre-generating persistent secrets"
 mkdir -p "${STATE_DIR}"
 chmod 700 "${STATE_DIR}"
 ensure_secret_file "${STATE_DIR}/grafana-admin-password"
 ensure_secret_file "${STATE_DIR}/clickhouse-password"
 GRAFANA_ADMIN_PASSWORD=$(cat "${STATE_DIR}/grafana-admin-password")
 CLICKHOUSE_PASSWORD=$(cat "${STATE_DIR}/clickhouse-password")
+
+log "STEP 1: Cloning repository"
 if [ -d "${REPO_DIR}/.git" ]; then
   git -C "${REPO_DIR}" pull --ff-only
 else
@@ -66,29 +93,20 @@ curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server \
 echo 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml' > /etc/profile.d/k3s.sh
 chmod +x /etc/profile.d/k3s.sh
 
-# ── STEP 3: Wait for K3s node Ready ──────────────────────────────────────────
-# log "STEP 3: Waiting for K3s node to become Ready"
-# kubectl wait nodes --all --for=condition=Ready --timeout=300s
-# kubectl get nodes -o wide
-log "[$(date +'%Y-%m-%d %H:%M:%S')] [BOOTSTRAP] STEP 3: Waiting for K3s API"
+# ── STEP 3: Wait for K3s API + node Ready ────────────────────────────────────
+log "STEP 3: Waiting for K3s API server"
+until kubectl get nodes &>/dev/null; do sleep 5; done
 
-# Aguarda o API Server responder
-until kubectl get nodes &> /dev/null; do
-  sleep 5
-done
-
-# Sleep tático para garantir que o scheduler e os metadados do nó estabilizem
-log "API disponível. Aguardando 15 segundos para estabilização de metadados..."
+log "STEP 3: Allowing 15 s for metadata stabilisation"
 sleep 15
 
-log "[$(date +'%Y-%m-%d %H:%M:%S')] [BOOTSTRAP] Node registered! Waiting for Ready state..."
-# Adicionamos um retry no próprio wait para não derrubar o script se o seletor falhar na primeira
+log "STEP 3: Waiting for node Ready state"
 for i in {1..5}; do
   kubectl wait --for=condition=Ready nodes --all --timeout=60s && break || sleep 10
 done
 
 # ── STEP 4: cert-manager ──────────────────────────────────────────────────────
-log "STEP 4: Installing cert-manager via Helm"
+log "STEP 4: Installing cert-manager (ArgoCD webhook dependency)"
 helm repo add jetstack https://charts.jetstack.io --force-update
 helm repo update jetstack
 helm upgrade --install cert-manager jetstack/cert-manager \
@@ -96,24 +114,20 @@ helm upgrade --install cert-manager jetstack/cert-manager \
   --set installCRDs=true \
   --wait --timeout=5m
 
-# ── STEP 5: Wait for cert-manager (+ webhook warm-up) ────────────────────────
-log "STEP 5: Waiting for cert-manager pods"
 wait_ready cert-manager
-# The admission webhook needs ~15 s after pod readiness to register its TLS config.
-log "STEP 5: Allowing 20 s for cert-manager webhook registration"
+log "STEP 4: Allowing 20 s for cert-manager webhook TLS registration"
 sleep 20
 
-# ── STEP 6: ArgoCD ────────────────────────────────────────────────────────────
-log "STEP 6: Installing ArgoCD"
+# ── STEP 5: ArgoCD ────────────────────────────────────────────────────────────
+log "STEP 5: Installing ArgoCD"
 kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply --server-side -n argocd \
   -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 
-# ── STEP 7: Wait for ArgoCD + patch server to NodePort 30080 ─────────────────
-log "STEP 7: Waiting for ArgoCD server deployment"
+log "STEP 5: Waiting for ArgoCD server"
 kubectl rollout status deployment argocd-server -n argocd --timeout=600s
 
-log "STEP 7: Patching argocd-server to NodePort 30080"
+log "STEP 5: Patching argocd-server to NodePort 30080 (HTTPS)"
 kubectl patch svc argocd-server -n argocd --type='merge' -p '{
   "spec": {
     "type": "NodePort",
@@ -136,289 +150,102 @@ kubectl patch svc argocd-server -n argocd --type='merge' -p '{
   }
 }'
 
-log "STEP 7: ArgoCD admin password is stored in secret argocd/argocd-initial-admin-secret"
+# ── STEP 6: Pre-ArgoCD secrets ────────────────────────────────────────────────
+# These secrets must exist BEFORE ArgoCD syncs the child apps because:
+#   - ghcr-login-secret  → imagePullSecret for the TaoNode Guardian image
+#   - grafana-admin-secret → consumed by the kube-prometheus-stack Helm values
+#   - taonode-guardian-clickhouse → consumed by the operator Deployment
+#
+# They are created with --dry-run=client | kubectl apply so re-runs are idempotent.
 
-# ── STEP 8: Prometheus + Grafana stack (Grafana NodePort 30030) ───────────────
-log "STEP 8: Installing kube-prometheus-stack"
-helm repo add prometheus-community \
-  https://prometheus-community.github.io/helm-charts --force-update
-helm repo update prometheus-community
-helm upgrade --install kube-prometheus-stack \
-  prometheus-community/kube-prometheus-stack \
-  --namespace monitoring --create-namespace \
-  --set grafana.service.type=NodePort \
-  --set grafana.service.nodePort=30030 \
-  --set grafana.adminPassword="${GRAFANA_ADMIN_PASSWORD}" \
-  --set prometheus.prometheusSpec.scrapeInterval=30s \
-  --wait --timeout=10m
-
-# ── STEP 9: OpenCost (NodePort 30040) ─────────────────────────────────────────
-log "STEP 9: Installing OpenCost"
-chmod +x "${REPO_DIR}/infra/aws/scripts/install-opencost.sh"
-"${REPO_DIR}/infra/aws/scripts/install-opencost.sh"
-
-# # ── STEP 10: ClickHouse via Altinity Operator ──────────────────────────────────
-log "STEP 10: Installing Altinity ClickHouse Operator"
-kubectl apply -f \
-  https://raw.githubusercontent.com/Altinity/clickhouse-operator/master/deploy/operator/clickhouse-operator-install-bundle.yaml
-
-# log "STEP 10: Waiting for clickhouse-operator pod"
-# kubectl wait pods -n kube-system -l app=clickhouse-operator \
-#   --for=condition=Ready --timeout=300s
-
-log "STEP 10: Waiting for clickhouse-operator pod to be scheduled"
-# Loop que aguarda o Kubernetes criar o objeto do Pod no API Server antes de dar o wait
-until [ "$(kubectl get pods -n kube-system -l app=clickhouse-operator --no-headers 2>/dev/null | wc -l)" -gt 0 ]; do
-  sleep 3
-done
-
-log "STEP 10: Pod found! Waiting for Ready state..."
-kubectl wait pods -n kube-system -l app=clickhouse-operator \
-  --for=condition=Ready --timeout=300s
-
-
-kubectl create namespace clickhouse --dry-run=client -o yaml | kubectl apply -f -
-
-log "STEP 10: Creating ClickHouseInstallation CR"
-kubectl apply -n clickhouse -f - <<CHEOF
-apiVersion: clickhouse.altinity.com/v1
-kind: ClickHouseInstallation
-metadata:
-  name: taonode
-spec:
-  configuration:
-    clusters:
-      - name: cluster
-        layout:
-          shardsCount: 1
-          replicasCount: 1
-    users:
-      guardian/password: ${CLICKHOUSE_PASSWORD}
-      guardian/networks/ip: "::/0"
-  defaults:
-    templates:
-      podTemplate: default
-      dataVolumeClaimTemplate: data-volume
-  templates:
-    podTemplates:
-      - name: default
-        spec:
-          containers:
-            - name: clickhouse
-              image: clickhouse/clickhouse-server:24.3
-              resources:
-                requests:
-                  cpu: "1"
-                  memory: "4Gi"
-                limits:
-                  cpu: "2"
-                  memory: "8Gi"
-    volumeClaimTemplates:
-      - name: data-volume
-        spec:
-          accessModes:
-            - ReadWriteOnce
-          resources:
-            requests:
-              storage: 20Gi
-CHEOF
-
-log "STEP 10: Waiting for ClickHouse pods to be scheduled by the Operator..."
-# Loop que aguarda o Operator reagir ao CR e criar os Pods físicos
-until [ "$(kubectl get pods -n clickhouse -l 'clickhouse.altinity.com/chi=taonode' --no-headers 2>/dev/null | wc -l)" -gt 0 ]; do
-  sleep 5
-done
-
-log "STEP 10: ClickHouse Pods found! Waiting for Ready state (image pull may take several minutes)..."
-kubectl wait pods -n clickhouse \
-  -l "clickhouse.altinity.com/chi=taonode" \
-  --for=condition=Ready --timeout=600s
-
-log "STEP 10: Creating taonode_guardian database"
-CHPOD=$(kubectl get pods -n clickhouse -l "clickhouse.altinity.com/chi=taonode" \
-  -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n clickhouse "${CHPOD}" -- \
-  clickhouse-client --user guardian --password "${CLICKHOUSE_PASSWORD}" \
-  --query="CREATE DATABASE IF NOT EXISTS taonode_guardian"
-
-# ── STEP 11: Ollama ────────────────────────────────────────────────────────────
-log "STEP 11: Installing Ollama (CPU inference)"
-helm repo add ollama https://otwld.github.io/ollama-helm/ --force-update
-helm repo update ollama
-helm upgrade --install ollama ollama/ollama \
-  --namespace ollama --create-namespace \
-  --set ollama.gpu.enabled=false \
-  --set resources.requests.cpu="1" \
-  --set resources.requests.memory="4Gi" \
-  --set resources.limits.cpu="4" \
-  --set resources.limits.memory="16Gi" \
-  --set service.type=ClusterIP \
-  --wait --timeout=10m
-
-log "STEP 11: Pre-pulling llama3.1:8b-instruct-q4_K_M model (background)"
-OLLAMA_POD=$(kubectl get pods -n ollama -l app.kubernetes.io/name=ollama \
-  -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n ollama "${OLLAMA_POD}" -- \
-  ollama pull llama3.1:8b-instruct-q4_K_M &
-OLLAMA_PULL_PID=$!
-
-# ── STEP 12: TaoNode CRDs + Operator + Chain Simulator + Sample TaoNode ────────
-log "STEP 12: Applying TaoNode Guardian CRDs"
-kubectl apply -f "${REPO_DIR}/config/crd/bases/"
-
-log "STEP 12: Creating taonode-guardian-system namespace"
+log "STEP 6: Creating namespace taonode-guardian-system"
 kubectl create namespace taonode-guardian-system \
   --dry-run=client -o yaml | kubectl apply -f -
 
-log "STEP 12: Applying RBAC manifests"
-kubectl apply -k "${REPO_DIR}/config/rbac/"
+log "STEP 6: Creating ghcr-login-secret in taonode-guardian-system"
+kubectl create secret docker-registry ghcr-login-secret \
+  --docker-server=ghcr.io \
+  --docker-username="${GHCR_USER}" \
+  --docker-password="${GHCR_PAT}" \
+  --docker-email="${GHCR_EMAIL}" \
+  -n taonode-guardian-system \
+  --dry-run=client -o yaml | kubectl apply -f -
 
-log "STEP 12: Deploying TaoNode Guardian Operator"
+log "STEP 6: Creating namespace monitoring"
+kubectl create namespace monitoring \
+  --dry-run=client -o yaml | kubectl apply -f -
 
-sed -i "s|controller:latest|ghcr.io/claudiobotelhosb/taonode-guardian:latest|g" "${REPO_DIR}/config/manager/manager.yaml"
+log "STEP 6: Creating grafana-admin-secret in monitoring namespace"
+kubectl create secret generic grafana-admin-secret \
+  -n monitoring \
+  --from-literal=admin-password="${GRAFANA_ADMIN_PASSWORD}" \
+  --from-literal=admin-user=admin \
+  --dry-run=client -o yaml | kubectl apply -f -
 
-kubectl apply -n taonode-guardian-system \
-  -f "${REPO_DIR}/config/manager/manager.yaml"
+log "STEP 6: Creating namespace clickhouse"
+kubectl create namespace clickhouse \
+  --dry-run=client -o yaml | kubectl apply -f -
 
-log "STEP 12: Waiting for TaoNode Guardian Operator rollout..."
-kubectl rollout status deployment taonode-guardian-controller-manager \
-  -n taonode-guardian-system --timeout=300s
-
-log "STEP 12: Creating ClickHouse credentials secret for the operator"
+log "STEP 6: Creating taonode-guardian-clickhouse secret"
 kubectl create secret generic taonode-guardian-clickhouse \
   -n taonode-guardian-system \
+  --from-literal=endpoint="clickhouse://clickhouse-taonode.clickhouse.svc:9000" \
   --from-literal=username=guardian \
+  --from-literal=password="${CLICKHOUSE_PASSWORD}" \
+  --from-literal=database=taonode_guardian \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# Mirror the clickhouse secret into the clickhouse namespace for the CR
+kubectl create secret generic taonode-guardian-clickhouse \
+  -n clickhouse \
   --from-literal=password="${CLICKHOUSE_PASSWORD}" \
   --dry-run=client -o yaml | kubectl apply -f -
 
-log "STEP 12: Deploying chain-simulator (simulates :9616/health endpoint)"
-kubectl apply -n default -f - <<'SIMEOF'
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: chain-simulator
-  labels:
-    app: chain-simulator
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: chain-simulator
-  template:
-    metadata:
-      labels:
-        app: chain-simulator
-    spec:
-      containers:
-        - name: probe
-          image: ghcr.io/claudiobotelhosb/taonode-guardian-probe:latest
-          imagePullPolicy: Always
-          ports:
-            - containerPort: 9616
-          env:
-            - name: SIMULATE_CHAIN
-              value: "true"
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 9616
-            initialDelaySeconds: 5
-            periodSeconds: 10
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: chain-simulator
-spec:
-  selector:
-    app: chain-simulator
-  ports:
-    - name: probe
-      port: 9616
-      targetPort: 9616
-SIMEOF
+# ── STEP 7: Altinity ClickHouse Operator ─────────────────────────────────────
+# Installed imperatively because Altinity does not publish a Helm chart in a
+# stable registry compatible with ArgoCD multi-source. The operator CRDs must
+# exist before the ClickHouseInstallation CR (managed by ArgoCD foundations app).
+log "STEP 7: Installing Altinity ClickHouse Operator"
+kubectl apply -f \
+  https://raw.githubusercontent.com/Altinity/clickhouse-operator/master/deploy/operator/clickhouse-operator-install-bundle.yaml
 
-log "STEP 12: Applying sample TaoNode CR (miner-demo-sn1)"
-kubectl apply -f - <<'TAOEOF'
-apiVersion: tao.guardian.io/v1alpha1
-kind: TaoNode
-metadata:
-  name: miner-demo-sn1
-  namespace: taonode-guardian-system
-  labels:
-    tao.guardian.io/network: testnet
-    tao.guardian.io/role: miner
-    tao.guardian.io/subnet: "1"
-spec:
-  network: testnet
-  subnetID: 1
-  role: miner
-  image: "ghcr.io/opentensor/subtensor:latest"
-  version: "1.9.4"
-  resources:
-    requests:
-      cpu: "1"
-      memory: 2Gi
-    limits:
-      cpu: "2"
-      memory: 4Gi
-  chainStorage:
-    storageClass: local-path
-    size: 20Gi
-  syncPolicy:
-    maxBlockLag: 100
-    recoveryStrategy: restart
-    maxRestartAttempts: 3
-    probeIntervalSeconds: 30
-    syncTimeoutMinutes: 60
-  monitoring:
-    enabled: true
-    port: 9615
-  analytics:
-    enabled: true
-    clickhouseRef:
-      endpoint: "clickhouse://clickhouse-taonode.clickhouse.svc:9000"
-      database: taonode_guardian
-      credentialsSecret: taonode-guardian-clickhouse
-      tls: false
-    ingestion:
-      batchSize: 1000
-      flushIntervalSeconds: 10
-      chainEvents: true
-      minerTelemetry: true
-      reconcileAudit: true
-    anomalyDetection:
-      enabled: true
-      evaluationIntervalSeconds: 60
-      syncDriftThreshold: 50
-      diskExhaustionHorizonHours: 48
-  aiAdvisor:
-    enabled: true
-    endpoint: "http://ollama.ollama.svc:11434"
-    model: "llama3.1:8b-instruct-q4_K_M"
-    timeoutSeconds: 30
-    minAnomalyScoreForAdvisory: "0.6"
-    contextWindowTokens: 4096
-  nodeSelector:
-    kubernetes.io/os: linux
-TAOEOF
+log "STEP 7: Waiting for clickhouse-operator pod to be scheduled"
+until [ "$(kubectl get pods -n kube-system -l app=clickhouse-operator --no-headers 2>/dev/null | wc -l)" -gt 0 ]; do
+  sleep 3
+done
+kubectl wait pods -n kube-system -l app=clickhouse-operator \
+  --for=condition=Ready --timeout=300s
 
-# ── Wait for background Ollama model pull to finish ───────────────────────────
-log "Waiting for Ollama model pull to complete (PID ${OLLAMA_PULL_PID})"
-wait "${OLLAMA_PULL_PID}" || log "Ollama model pull completed (or was already cached)"
+# ── STEP 8: Apply Root App-of-Apps → ArgoCD takes over ───────────────────────
+# From this point, ArgoCD reconciles ALL workloads declared in argocd/apps/:
+#   • foundations  (wave 1) — cert-manager, kube-prometheus-stack, ClickHouse CR, Ollama
+#   • observability (wave 1) — Kubecost 2.8.0, TaoNode ServiceMonitor
+#   • control-plane (wave 2) — TaoNode Guardian CRDs + Operator (ghcr.io image)
+#   • data-plane    (wave 3) — TaoNode CRs (sample miner)
+log "STEP 8: Applying Root App-of-Apps"
+kubectl apply -n argocd -f "${REPO_DIR}/argocd/apps/root.yaml"
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 PUBLIC_IP=$(curl -sf http://169.254.169.254/latest/meta-data/public-ipv4 || echo "<public-ip>")
 
 log "============================================================"
-log "Bootstrap complete!"
+log "Bootstrap complete! ArgoCD is now reconciling all workloads."
 log ""
-log "  Kubeconfig:  scp ubuntu@${PUBLIC_IP}:/etc/rancher/k3s/k3s.yaml ~/.kube/taonode.yaml"
+log "  Kubeconfig (copy from remote):"
+log "    scp -i ~/.ssh/taonode-demo ubuntu@${PUBLIC_IP}:/etc/rancher/k3s/k3s.yaml ~/.kube/taonode-aws.yaml"
+log "    export KUBECONFIG=~/.kube/taonode-aws.yaml"
 log ""
-log "  SSH tunnels (one per tab):"
-log "    ssh -N -L 30030:localhost:30030 ubuntu@${PUBLIC_IP}  # Grafana    -> http://localhost:30030"
-log "    ssh -N -L 30080:localhost:30080 ubuntu@${PUBLIC_IP}  # ArgoCD     -> https://localhost:30080"
-log "    ssh -N -L 30040:localhost:30040 ubuntu@${PUBLIC_IP}  # OpenCost   -> http://localhost:30040"
+log "  ArgoCD initial admin password:"
+log "    kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d"
 log ""
-log "  kubectl get taonode -A"
+log "  Grafana admin password:"
+log "    cat /var/lib/taonode-guardian/grafana-admin-password"
+log ""
+log "  SSH tunnels (one per terminal tab):"
+log "    ssh -N -L 30030:localhost:30030 ubuntu@${PUBLIC_IP}  # Grafana  → http://localhost:30030"
+log "    ssh -N -L 30080:localhost:30080 ubuntu@${PUBLIC_IP}  # ArgoCD   → https://localhost:30080"
+log "    ssh -N -L 9090:localhost:9090   ubuntu@${PUBLIC_IP}  # Kubecost → http://localhost:9090 (port-forward manually)"
+log ""
+log "  Watch ArgoCD sync:"
+log "    kubectl get applications -n argocd -w"
 log "============================================================"

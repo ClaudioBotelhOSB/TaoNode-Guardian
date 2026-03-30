@@ -10,9 +10,9 @@ variable "ssh_public_key" {
 }
 
 variable "instance_type" {
-  description = "EC2 instance type. t3.2xlarge (8 vCPU / 32 GB RAM) covers K3s control-plane + all stack components (Prometheus, ClickHouse, Ollama, Operator)."
+  description = "EC2 instance type. t3.medium (2 vCPU / 4 GB RAM) for lightweight K3s single-node with ArgoCD, Grafana and Kubecost."
   type        = string
-  default     = "t3.2xlarge"
+  default     = "t3.medium"
 }
 
 variable "use_spot" {
@@ -22,18 +22,19 @@ variable "use_spot" {
 }
 
 variable "spot_price" {
-  description = "Maximum Spot bid price in USD/hr. Default $0.15 is well above the typical Spot market price for t3.2xlarge (~$0.09) but below on-demand ($0.33)."
+  description = "Maximum Spot bid price in USD/hr. Default $0.03 is above the typical Spot market price for t3.medium (~$0.013) but below on-demand ($0.042)."
   type        = string
-  default     = "0.15"
-}
-
-variable "admin_cidrs" {
-  description = "Trusted CIDRs allowed to reach SSH and the K3s API. Use VPN/office /32s, never 0.0.0.0/0 in production."
-  type        = list(string)
+  default     = "0.03"
 }
 
 variable "github_token" {
-  description = "GitHub Token to clone the repo"
+  description = "GitHub fine-grained PAT with 'Contents: Read' scope — used to clone the private repo during bootstrap."
+  type        = string
+  sensitive   = true
+}
+
+variable "ghcr_pat" {
+  description = "GitHub PAT with 'read:packages' scope — used to pull ghcr.io/claudiobotelhosb/taonode-guardian:latest. Injected as the imagePullSecret 'ghcr-login-secret' in taonode-guardian-system namespace."
   type        = string
   sensitive   = true
 }

@@ -13,6 +13,7 @@ cover.out
 .terraform.lock.hcl
 **/.terraform.lock.hcl
 *.tfvars
+!*.tfvars.example
 *.tfvars.json
 crash.log
 override.tf
@@ -31,3 +32,4 @@ infra/gcp/bootstrap.sh.bkp
 infra/aws/tfplan
 secrets-lint-errors.log
 go-lint-erros.log
+manual_commands.txt

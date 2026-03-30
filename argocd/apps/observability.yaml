@@ -1,0 +1,84 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: observability
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: taonode-guardian-observability
+    app.kubernetes.io/part-of: taonode-guardian
+  annotations:
+    # sync-wave "1" — runs alongside foundations; both bring up monitoring before
+    # the operator (wave 2) so metrics are scraped from the first reconcile.
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  sources:
+    # ── Kubecost cost-analyzer v2.8.0 ────────────────────────────────────────
+    # Pinned to 2.8.0 because 2.9.x is a migration-only bridge and 3.0.0 is not
+    # yet released in the kubecost/cost-analyzer chart index.
+    # Mandatory flags (chart validation enforces them at install time):
+    #   global.clusterId             — required by finopsagent chart
+    #   kubecostProductConfigs.clusterName — required by cost-analyzer chart
+    #   finopsagent.clusterId        — required by the FinOps agent deployment
+    - repoURL: https://kubecost.github.io/cost-analyzer/
+      chart: cost-analyzer
+      targetRevision: "2.8.0"
+      helm:
+        releaseName: kubecost
+        valuesObject:
+          global:
+            clusterId: taonode-aws-cluster
+          kubecostProductConfigs:
+            clusterName: taonode-aws-cluster
+          finopsagent:
+            clusterId: taonode-aws-cluster
+          # Disable the bundled Prometheus — reuse kube-prometheus-stack.
+          # This avoids running two Prometheus instances on a single-node cluster.
+          prometheus:
+            enabled: false
+            fqdn: http://kube-prometheus-stack-prometheus.monitoring.svc:9090
+          # Disable bundled Grafana — dashboards are imported into the stack's Grafana.
+          grafana:
+            enabled: false
+            fqdn: http://kube-prometheus-stack-grafana.monitoring.svc:80
+          # Service: ClusterIP (accessed via kubectl port-forward or SSH tunnel)
+          service:
+            type: ClusterIP
+
+    # ── ServiceMonitor — TaoNode Guardian Operator ────────────────────────────
+    # Monitors the controller-manager metrics endpoint on port 8080 (HTTP).
+    # kube-prometheus-stack picks this up automatically via label selector on
+    # any ServiceMonitor matching release=kube-prometheus-stack.
+    - repoURL: https://github.com/ClaudioBotelhOSB/taonode-guardian
+      targetRevision: HEAD
+      path: argocd/monitors
+
+  # ── Destination ─────────────────────────────────────────────────────────────
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kubecost
+
+  # ── Sync policy ─────────────────────────────────────────────────────────────
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m
+
+  # ── Ignore fields managed outside Helm ───────────────────────────────────────
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/template/spec/containers/0/resources

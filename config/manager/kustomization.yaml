@@ -3,6 +3,7 @@ kind: Kustomization
 
 resources:
 - manager.yaml
+- metrics-service.yaml
 
 # Pin the controller image for a release.
 # CI overrides this with: kustomize edit set image controller=<registry>/<repo>:<sha>

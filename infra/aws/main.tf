@@ -20,7 +20,7 @@ provider "aws" {
   }
 }
 
-# ── AMI: Ubuntu 24.04 LTS (gp3-backed HVM) ───────────────────────────────────
+# ── AMI: Ubuntu 22.04 LTS (Jammy Jellyfish) ──────────────────────────────────
 
 data "aws_ami" "ubuntu" {
   most_recent = true
@@ -28,7 +28,7 @@ data "aws_ami" "ubuntu" {
 
   filter {
     name   = "name"
-    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"]
+    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
   }
 
   filter {
@@ -80,13 +80,11 @@ resource "aws_route_table_association" "public" {
 }
 
 # ── Security Group ────────────────────────────────────────────────────────────
-# Ingress is restricted to the four ports required for SSH, K3s API, and
-# standard web traffic. NodePort services (Grafana, ArgoCD, OpenCost) are
-# accessed via SSH tunnels, not direct internet exposure.
+# All 9 ingress rules match the live AWS SG + Kubecost (9090).
 
 resource "aws_security_group" "k3s" {
   name        = "taonode-guardian-k3s-sg"
-  description = "K3s single-node - ingress on 22 (SSH), 6443 (K3s API), 80 (HTTP), 443 (HTTPS)."
+  description = "K3s single-node — SSH, HTTP/S, K3s API, Grafana, ArgoCD, Kubecost."
   vpc_id      = aws_vpc.k3s.id
 
   ingress {
@@ -94,15 +92,7 @@ resource "aws_security_group" "k3s" {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = var.admin_cidrs
-  }
-
-  ingress {
-    description = "K3s API server"
-    from_port   = 6443
-    to_port     = 6443
-    protocol    = "tcp"
-    cidr_blocks = var.admin_cidrs
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
@@ -117,6 +107,54 @@ resource "aws_security_group" "k3s" {
     description = "HTTPS"
     from_port   = 443
     to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "Grafana"
+    from_port   = 3000
+    to_port     = 3000
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "Grafana alt"
+    from_port   = 3001
+    to_port     = 3001
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "K3s API server"
+    from_port   = 6443
+    to_port     = 6443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "ArgoCD HTTP"
+    from_port   = 8080
+    to_port     = 8080
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "Kubecost"
+    from_port   = 9090
+    to_port     = 9090
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "Grafana NodePort"
+    from_port   = 30030
+    to_port     = 30030
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -152,7 +190,9 @@ resource "aws_instance" "k3s" {
 
   user_data = <<-EOF
     #!/bin/bash
+    # Injected by Terraform — do NOT commit these values to Git.
     export GITHUB_TOKEN="${var.github_token}"
+    export GHCR_PAT="${var.ghcr_pat}"
     ${file("${path.module}/scripts/bootstrap.sh")}
   EOF
 
@@ -165,7 +205,7 @@ resource "aws_instance" "k3s" {
     delete_on_termination = true
   }
 
-  # FinOps: Spot reduces cost by ~70 % vs on-demand for t3.2xlarge (~$0.33/hr → ~$0.09/hr).
+  # FinOps: Spot reduces cost by ~70 % vs on-demand for t3.medium (~$0.042/hr → ~$0.013/hr).
   # Spot interruption triggers a 2-minute warning; pair with PodDisruptionBudgets in production.
   dynamic "instance_market_options" {
     for_each = var.use_spot ? [1] : []
