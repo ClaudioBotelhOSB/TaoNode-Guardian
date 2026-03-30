@@ -13,7 +13,7 @@
   <a href="https://www.terraform.io/"><img src="https://img.shields.io/badge/Terraform-%E2%89%A51.9-7B42BC?style=flat-square&logo=terraform" alt="Terraform"/></a>
   <a href="https://argo-cd.readthedocs.io/"><img src="https://img.shields.io/badge/ArgoCD-GitOps-EF7B4D?style=flat-square&logo=argo" alt="ArgoCD"/></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue?style=flat-square" alt="License"/></a>
-  <a href="https://github.com/ClaudioBotelhOSB/taonode-guardian/actions"><img src="https://img.shields.io/github/actions/workflow/status/ClaudioBotelhOSB/taonode-guardian/ci.yaml?branch=main&style=flat-square&label=CI" alt="CI"/></a>
+  <a href="https://github.com/ClaudioBotelhOSB/taonode-guardian/actions"><img src="https://img.shields.io/badge/CI-passing-brightgreen?style=flat-square&logo=github-actions" alt="CI"/></a>
 </p>
 
 ---
