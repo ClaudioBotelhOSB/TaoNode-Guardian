@@ -22,6 +22,8 @@ spec:
         kubectl.kubernetes.io/default-container: manager
     spec:
       serviceAccountName: taonode-guardian-controller-manager
+      imagePullSecrets:
+        - name: ghcr-login-secret
       terminationGracePeriodSeconds: 30
 
       securityContext:
@@ -107,7 +109,7 @@ spec:
             # ── AI advisor — Ollama ──────────────────────────────────────────
             # Feature-gated: Advisor is nil when OLLAMA_URL is empty (see initAI()).
             # Point to an Ollama sidecar or in-cluster Ollama Deployment.
-            - name: OLLAMA_URL
+            - name: OLLAMA_ENDPOINT
               value: ""  # e.g. http://ollama.taonode-guardian-system.svc:11434
             - name: OLLAMA_MODEL
               value: "llama3.1:8b-instruct-q4_K_M"

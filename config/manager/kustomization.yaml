@@ -8,5 +8,5 @@ resources:
 # CI overrides this with: kustomize edit set image controller=<registry>/<repo>:<sha>
 images:
 - name: controller
-  newName: ghcr.io/ClaudioBotelhOSB/taonode-guardian
+  newName: ghcr.io/claudiobotelhosb/taonode-guardian
   newTag: latest

@@ -1184,6 +1184,7 @@ rules:
   - create
   - update
   - patch
+  - delete
 - apiGroups:
   - ""
   resources:
@@ -1204,7 +1205,6 @@ rules:
   - create
   - update
   - patch
-  - delete
 - apiGroups:
   - coordination.k8s.io
   resources:
@@ -1345,7 +1345,7 @@ spec:
               optional: true
         - name: CLICKHOUSE_TLS
           value: "false"
-        - name: OLLAMA_URL
+        - name: OLLAMA_ENDPOINT
           value: ""
         - name: OLLAMA_MODEL
           value: llama3.1:8b-instruct-q4_K_M
@@ -1399,6 +1399,8 @@ spec:
         - mountPath: /tmp/k8s-webhook-server/serving-certs
           name: webhook-certs
           readOnly: true
+      imagePullSecrets:
+      - name: ghcr-login-secret
       securityContext:
         runAsNonRoot: true
         seccompProfile:

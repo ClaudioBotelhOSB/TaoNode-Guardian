@@ -30,7 +30,7 @@ rules:
   # ── ServiceAccounts — created per TaoNode for pod identity ──────────────────
   - apiGroups: [""]
     resources: ["serviceaccounts"]
-    verbs: ["get", "list", "watch", "create", "update", "patch"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
   # ── Pods — watched for probe injection and phase detection ──────────────────
   - apiGroups: [""]
@@ -40,7 +40,7 @@ rules:
   # ── PersistentVolumeClaims — chain data storage + auto-expand ───────────────
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
 
   # ── Leases — validator singleton coordination ───────────────────────────────
   - apiGroups: ["coordination.k8s.io"]
