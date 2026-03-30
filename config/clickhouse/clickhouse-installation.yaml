@@ -1,0 +1,44 @@
+apiVersion: "clickhouse.altinity.com/v1"
+kind: "ClickHouseInstallation"
+metadata:
+  name: clickhouse-taonode
+  namespace: clickhouse
+spec:
+  defaults:
+    templates:
+      dataVolumeClaimTemplate: data-volume
+      serviceTemplate: lb-service
+  configuration:
+    settings:
+      check_table_structure_completely: "true"
+      max_part_loading_threads: "4"
+      background_pool_size: "4"
+      background_merges_mutations_concurrency_ratio: "1"
+    users:
+      default/networks/ip: "::/0"
+    clusters:
+      - name: taonode
+        layout:
+          shardsCount: 1
+          replicasCount: 1
+  templates:
+    volumeClaimTemplates:
+      - name: data-volume
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          storageClassName: local-path
+          resources:
+            requests:
+              storage: 20Gi
+    serviceTemplates:
+      - name: lb-service
+        spec:
+          type: LoadBalancer
+          ports:
+            - name: http
+              port: 8123
+              targetPort: 8123
+            - name: tcp
+              port: 9000
+              targetPort: 9000

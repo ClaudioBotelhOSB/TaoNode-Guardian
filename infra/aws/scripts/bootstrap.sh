@@ -153,6 +153,22 @@ log "STEP 5: Disabling argocd-server TLS (HTTP-only demo mode)"
 kubectl patch deployment argocd-server -n argocd --type='json' \
   -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--insecure"}]'
 
+log "STEP 5: Creating ArgoCD repo credentials for private GitHub repo"
+kubectl apply -f - <<ARGOCD_REPO
+apiVersion: v1
+kind: Secret
+metadata:
+  name: github-repo-creds
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository
+stringData:
+  type: git
+  url: https://github.com/${GITHUB_USER}/taonode-guardian
+  username: ${GITHUB_USER}
+  password: ${GITHUB_TOKEN}
+ARGOCD_REPO
+
 # ── STEP 6: Pre-ArgoCD secrets ────────────────────────────────────────────────
 # These secrets must exist BEFORE ArgoCD syncs the child apps because:
 #   - ghcr-login-secret  → imagePullSecret for the TaoNode Guardian image

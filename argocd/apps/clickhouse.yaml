@@ -7,61 +7,21 @@ metadata:
     app.kubernetes.io/name: taonode-guardian-clickhouse
     app.kubernetes.io/part-of: taonode-guardian
   annotations:
-    # sync-wave "1" — alongside foundations; analytics plane must be available
-    # before the operator (wave 2) starts pushing telemetry rows.
     argocd.argoproj.io/sync-wave: "1"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
 
-  sources:
-    # ── bitnami/clickhouse ────────────────────────────────────────────────────
-    # Single-shard, single-replica — adequate for demo and dev workloads.
-    # Secret taonode-guardian-clickhouse must exist in namespace clickhouse
-    # before sync (created by bootstrap.sh or kubectl create secret).
-    - repoURL: https://charts.bitnami.com/bitnami
-      chart: clickhouse
-      targetRevision: "9.4.4"
-      helm:
-        releaseName: clickhouse
-        valuesObject:
-          auth:
-            existingSecret: taonode-guardian-clickhouse
-            existingSecretKey: password
-          replicaCount: 1
-          shards: 1
-          zookeeper:
-            enabled: false
-          service:
-            type: LoadBalancer
-            ports:
-              http: 8123      # HTTP interface (play UI, curl queries)
-              tcp: 9000       # Native protocol (Go/Python clients)
-          persistence:
-            size: 20Gi
-            storageClass: local-path
-          # ── Startup tuning (conservative — 4 vCPUs, shared with validator) ──
-          # check_table_structure_completely=true: mantém a detecção de
-          # inconsistência estrutural após shutdown sujo ou reset da EC2.
-          # background_pool_size=4 e ratio=1: máximo 4 merges simultâneos
-          # (pool/ratio), evitando saturação de CPU no boot com o validador ativo.
-          # Para reajustar ao migrar para >= 8 vCPUs: pool=8, ratio=2.
-          extraOverrides: |
-            <clickhouse>
-              <check_table_structure_completely>true</check_table_structure_completely>
-              <max_part_loading_threads>4</max_part_loading_threads>
-              <background_pool_size>4</background_pool_size>
-              <background_merges_mutations_concurrency_ratio>1</background_merges_mutations_concurrency_ratio>
-            </clickhouse>
+  source:
+    repoURL: https://github.com/ClaudioBotelhOSB/taonode-guardian
+    targetRevision: HEAD
+    path: config/clickhouse
 
-  # ── Destination ─────────────────────────────────────────────────────────────
-  # Namespace dedicado: secret, DNS interno e bootstrap presumem "clickhouse".
   destination:
     server: https://kubernetes.default.svc
     namespace: clickhouse
 
-  # ── Sync policy ─────────────────────────────────────────────────────────────
   syncPolicy:
     automated:
       prune: true
