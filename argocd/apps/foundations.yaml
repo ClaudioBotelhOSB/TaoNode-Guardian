@@ -50,8 +50,9 @@ spec:
           grafana:
             namespaceOverride: monitoring
             service:
-              type: NodePort
-              nodePort: 30030
+              type: LoadBalancer
+              port: 80
+              targetPort: 3000
             # Password is sourced from a secret created by bootstrap.sh.
             # To rotate: kubectl create secret generic grafana-admin-secret \
             #   -n monitoring --from-literal=admin-password=<new> --dry-run=client -o yaml | kubectl apply -f -

@@ -16,50 +16,27 @@ spec:
   project: default
 
   sources:
-    # ── Kubecost cost-analyzer v2.8.0 ────────────────────────────────────────
-    # Pinned to 2.8.0 because 2.9.x is a migration-only bridge and 3.0.0 is not
-    # yet released in the kubecost/cost-analyzer chart index.
-    # Mandatory flags (chart validation enforces them at install time):
-    #   global.clusterId             — required by finopsagent chart
-    #   kubecostProductConfigs.clusterName — required by cost-analyzer chart
-    #   finopsagent.clusterId        — required by the FinOps agent deployment
-    - repoURL: https://kubecost.github.io/cost-analyzer/
-      chart: cost-analyzer
-      targetRevision: "2.8.0"
-      helm:
-        releaseName: kubecost
-        valuesObject:
-          global:
-            clusterId: taonode-aws-cluster
-          kubecostProductConfigs:
-            clusterName: taonode-aws-cluster
-          finopsagent:
-            clusterId: taonode-aws-cluster
-          # Disable the bundled Prometheus — reuse kube-prometheus-stack.
-          # This avoids running two Prometheus instances on a single-node cluster.
-          prometheus:
-            enabled: false
-            fqdn: http://kube-prometheus-stack-prometheus.monitoring.svc:9090
-          # Disable bundled Grafana — dashboards are imported into the stack's Grafana.
-          grafana:
-            enabled: false
-            fqdn: http://kube-prometheus-stack-grafana.monitoring.svc:80
-          # Service: ClusterIP (accessed via kubectl port-forward or SSH tunnel)
-          service:
-            type: ClusterIP
-
     # ── ServiceMonitor — TaoNode Guardian Operator ────────────────────────────
     # Monitors the controller-manager metrics endpoint on port 8080 (HTTP).
     # kube-prometheus-stack picks this up automatically via label selector on
     # any ServiceMonitor matching release=kube-prometheus-stack.
     - repoURL: https://github.com/ClaudioBotelhOSB/taonode-guardian
-      targetRevision: HEAD
+      targetRevision: main
       path: argocd/monitors
+
+    # ── Grafana Dashboards (ConfigMap sidecar auto-import) ────────────────────
+    # ConfigMaps labelled grafana_dashboard=1 are picked up by the Grafana
+    # sidecar provisioner bundled with kube-prometheus-stack. No Grafana restart
+    # required — the sidecar hot-reloads dashboards within ~30s of ConfigMap
+    # creation. namespace: monitoring is declared in each manifest directly.
+    - repoURL: https://github.com/ClaudioBotelhOSB/taonode-guardian
+      targetRevision: main
+      path: config/dashboards
 
   # ── Destination ─────────────────────────────────────────────────────────────
   destination:
     server: https://kubernetes.default.svc
-    namespace: kubecost
+    namespace: monitoring
 
   # ── Sync policy ─────────────────────────────────────────────────────────────
   syncPolicy:
@@ -75,10 +52,3 @@ spec:
         duration: 10s
         factor: 2
         maxDuration: 5m
-
-  # ── Ignore fields managed outside Helm ───────────────────────────────────────
-  ignoreDifferences:
-    - group: apps
-      kind: Deployment
-      jsonPointers:
-        - /spec/template/spec/containers/0/resources

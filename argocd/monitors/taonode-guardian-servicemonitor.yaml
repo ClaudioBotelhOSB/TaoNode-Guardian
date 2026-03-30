@@ -2,7 +2,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: taonode-guardian-controller-manager
-  namespace: taonode-guardian-system
+  namespace: monitoring
   labels:
     # This label must match the kube-prometheus-stack serviceMonitorSelector.
     # The default selector matches: release=kube-prometheus-stack
