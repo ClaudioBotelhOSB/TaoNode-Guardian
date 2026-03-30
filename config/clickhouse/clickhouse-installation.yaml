@@ -12,8 +12,6 @@ spec:
     settings:
       check_table_structure_completely: "true"
       max_part_loading_threads: "4"
-      background_pool_size: "4"
-      background_merges_mutations_concurrency_ratio: "1"
     users:
       default/networks/ip: "::/0"
     clusters:
