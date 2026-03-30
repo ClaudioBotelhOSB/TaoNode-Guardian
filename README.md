@@ -118,6 +118,61 @@ The `bootstrap.sh` script executes deterministically in a fixed 12-step sequence
 
 ---
 
+## 🚀 Acesso Rápido
+
+Após `terraform apply` e o ArgoCD sincronizar, rode um único script:
+
+```bash
+# Na sua máquina local (precisa de: aws cli, kubectl, terraform)
+export KUBECONFIG=~/.kube/taonode-aws.yaml
+bash hack/open-access.sh
+```
+
+O script executa 5 etapas automaticamente:
+
+| Etapa | O que faz |
+|-------|-----------|
+| 1 | Descobre o IP público da EC2 via `terraform output` |
+| 2 | Abre portas **80**, **443**, **8123** no AWS SG para o seu IP atual |
+| 3 | Aguarda os pods do ArgoCD ficarem `Ready` |
+| 4 | Extrai as senhas do ArgoCD e do Grafana dos Kubernetes Secrets |
+| 5 | Imprime o resumo de acesso com URLs clicáveis e senhas |
+
+**Saída esperada:**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│           TaoNode Guardian — Acesso Demo                │
+├─────────────────────────────────────────────────────────┤
+│ Grafana     http://<EC2_IP>
+│             Usuário : admin
+│             Senha   : <senha>
+│
+│ ArgoCD      https://<EC2_IP>
+│             Usuário : admin
+│             Senha   : <senha>
+│
+│ ClickHouse  http://<EC2_IP>:8123/play
+└─────────────────────────────────────────────────────────┘
+```
+
+**Overrides úteis:**
+
+```bash
+# IP da EC2 já conhecido (pula terraform output e AWS CLI)
+EC2_IP=$(terraform -chdir=infra/aws output -raw instance_ip) bash hack/open-access.sh
+
+# Apresentação na rede do cliente — forçar o CIDR da sala
+PUBLIC_CIDR=203.0.113.5/32 bash hack/open-access.sh
+
+# SG diferente do padrão
+SG_NAME=outro-sg bash hack/open-access.sh
+```
+
+> **Pré-requisitos locais:** `aws` CLI com credenciais configuradas, `kubectl` apontando para o cluster (`KUBECONFIG`), `terraform` instalado para o `output`.
+
+---
+
 ## ⚙️ Design Decisions & Trade-offs
 
 ### K3s — Why a Lightweight Distribution
