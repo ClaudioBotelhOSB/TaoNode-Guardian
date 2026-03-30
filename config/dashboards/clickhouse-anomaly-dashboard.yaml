@@ -1,0 +1,346 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: taonode-guardian-clickhouse-anomaly-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/name: taonode-guardian
+    app.kubernetes.io/part-of: taonode-guardian
+data:
+  clickhouse-anomaly-realtime.json: |
+    {
+      "annotations": {
+        "list": [
+          {
+            "builtIn": 1,
+            "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+            "enable": true,
+            "hide": true,
+            "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts",
+            "type": "dashboard"
+          }
+        ]
+      },
+      "description": "Real-time anomaly detection and chain health for TaoNode Guardian — powered by ClickHouse.",
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+          "id": 10,
+          "title": "Chain Health",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+          "description": "Block lag per node over time. Spikes indicate sync disruption.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisBorderShow": false,
+                "axisColorMode": "text",
+                "axisLabel": "blocks",
+                "fillOpacity": 10,
+                "gradientMode": "opacity",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineWidth": 2,
+                "spanNulls": false,
+                "thresholdsStyle": {"mode": "line+area"}
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "orange", "value": 100},
+                  {"color": "red", "value": 500}
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 1},
+          "id": 1,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+              "format": 1,
+              "queryType": "sql",
+              "rawSql": "SELECT\n  toStartOfInterval(timestamp, INTERVAL $__interval_s SECOND) AS time,\n  node_name,\n  avg(block_lag) AS value\nFROM taonode_guardian.chain_telemetry\nWHERE $__timeFilter(timestamp)\n  AND ($node_name = 'All' OR node_name = $node_name)\nGROUP BY time, node_name\nORDER BY time ASC",
+              "refId": "A"
+            }
+          ],
+          "title": "Block Lag (blocks)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+          "description": "Number of connected peers per node. Low peer count precedes sync degradation.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineWidth": 2,
+                "spanNulls": false,
+                "thresholdsStyle": {"mode": "line"}
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "red", "value": null},
+                  {"color": "orange", "value": 3},
+                  {"color": "green", "value": 8}
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 1},
+          "id": 2,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "min"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+              "format": 1,
+              "queryType": "sql",
+              "rawSql": "SELECT\n  toStartOfInterval(timestamp, INTERVAL $__interval_s SECOND) AS time,\n  node_name,\n  avg(peer_count) AS value\nFROM taonode_guardian.chain_telemetry\nWHERE $__timeFilter(timestamp)\n  AND ($node_name = 'All' OR node_name = $node_name)\nGROUP BY time, node_name\nORDER BY time ASC",
+              "refId": "A"
+            }
+          ],
+          "title": "Peer Count",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 9},
+          "id": 11,
+          "title": "Anomaly Detection",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+          "description": "Anomaly scores (0–1) per detector type. Score > 0.6 triggers AI advisory.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "fillOpacity": 20,
+                "gradientMode": "opacity",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineWidth": 2,
+                "spanNulls": false,
+                "thresholdsStyle": {"mode": "line+area"}
+              },
+              "max": 1,
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 0.4},
+                  {"color": "orange", "value": 0.6},
+                  {"color": "red", "value": 0.8}
+                ]
+              },
+              "unit": "percentunit"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 16, "x": 0, "y": 10},
+          "id": 3,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "right"},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+              "format": 1,
+              "queryType": "sql",
+              "rawSql": "SELECT\n  toStartOfInterval(timestamp, INTERVAL $__interval_s SECOND) AS time,\n  concat(node_name, '/', anomaly_type) AS metric,\n  avg(score) AS value\nFROM taonode_guardian.anomaly_scores\nWHERE $__timeFilter(timestamp)\n  AND ($node_name = 'All' OR node_name = $node_name)\nGROUP BY time, metric\nORDER BY time ASC",
+              "refId": "A"
+            }
+          ],
+          "title": "Anomaly Scores by Type",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+          "description": "Distribution of anomaly events by type in the selected time range.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"hideFrom": {"legend": false, "tooltip": false, "viz": false}},
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 16, "y": 10},
+          "id": 4,
+          "options": {
+            "displayLabels": ["name", "percent"],
+            "legend": {"displayMode": "table", "placement": "bottom", "values": ["value", "percent"]},
+            "pieType": "pie",
+            "tooltip": {"mode": "single", "sort": "none"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+              "format": 0,
+              "queryType": "sql",
+              "rawSql": "SELECT\n  anomaly_type AS name,\n  count() AS value\nFROM taonode_guardian.anomaly_scores\nWHERE $__timeFilter(timestamp)\n  AND score >= 0.4\n  AND ($node_name = 'All' OR node_name = $node_name)\nGROUP BY anomaly_type\nORDER BY value DESC",
+              "refId": "A"
+            }
+          ],
+          "title": "Anomaly Events by Type",
+          "type": "piechart"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 18},
+          "id": 12,
+          "title": "Resource Pressure",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+          "description": "Current disk usage % per node. > 80% triggers auto-expand.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "max": 100,
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 60},
+                  {"color": "orange", "value": 80},
+                  {"color": "red", "value": 90}
+                ]
+              },
+              "unit": "percent"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 19},
+          "id": 5,
+          "options": {
+            "minVizHeight": 75,
+            "minVizWidth": 75,
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": false
+            },
+            "showThresholdLabels": true,
+            "showThresholdMarkers": true
+          },
+          "targets": [
+            {
+              "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+              "format": 0,
+              "queryType": "sql",
+              "rawSql": "SELECT\n  node_name,\n  argMax(disk_usage_percent, timestamp) AS value\nFROM taonode_guardian.chain_telemetry\nWHERE $__timeFilter(timestamp)\n  AND ($node_name = 'All' OR node_name = $node_name)\nGROUP BY node_name",
+              "refId": "A"
+            }
+          ],
+          "title": "Disk Usage % (latest)",
+          "type": "gauge"
+        },
+        {
+          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+          "description": "Most recent anomaly events with AI-readable detail. Orange ≥ 0.6, Red ≥ 0.8.",
+          "fieldConfig": {
+            "defaults": {"custom": {"align": "auto", "cellOptions": {"type": "auto"}, "inspect": false}},
+            "overrides": [
+              {
+                "matcher": {"id": "byName", "options": "score"},
+                "properties": [
+                  {"id": "custom.cellOptions", "value": {"type": "color-background", "mode": "gradient"}},
+                  {"id": "thresholds", "value": {
+                    "mode": "absolute",
+                    "steps": [
+                      {"color": "green", "value": null},
+                      {"color": "yellow", "value": 0.4},
+                      {"color": "orange", "value": 0.6},
+                      {"color": "red", "value": 0.8}
+                    ]
+                  }},
+                  {"id": "unit", "value": "percentunit"}
+                ]
+              }
+            ]
+          },
+          "gridPos": {"h": 8, "w": 16, "x": 8, "y": 19},
+          "id": 6,
+          "options": {
+            "cellHeight": "sm",
+            "footer": {"countRows": false, "enablePagination": true, "fields": "", "reducer": ["sum"], "show": false},
+            "showHeader": true,
+            "sortBy": [{"desc": true, "displayName": "timestamp"}]
+          },
+          "targets": [
+            {
+              "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+              "format": 0,
+              "queryType": "sql",
+              "rawSql": "SELECT\n  timestamp,\n  node_name,\n  anomaly_type,\n  score,\n  detail\nFROM taonode_guardian.anomaly_scores\nWHERE $__timeFilter(timestamp)\n  AND score >= 0.4\n  AND ($node_name = 'All' OR node_name = $node_name)\nORDER BY timestamp DESC\nLIMIT 100",
+              "refId": "A"
+            }
+          ],
+          "title": "Recent Anomaly Events",
+          "type": "table"
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 39,
+      "tags": ["taonode-guardian", "anomaly", "clickhouse", "realtime"],
+      "templating": {
+        "list": [
+          {
+            "current": {},
+            "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+            "definition": "SELECT DISTINCT node_name FROM taonode_guardian.chain_telemetry ORDER BY node_name",
+            "hide": 0,
+            "includeAll": true,
+            "label": "Node",
+            "multi": false,
+            "name": "node_name",
+            "options": [],
+            "query": "SELECT DISTINCT node_name FROM taonode_guardian.chain_telemetry ORDER BY node_name",
+            "refresh": 2,
+            "sort": 1,
+            "type": "query"
+          }
+        ]
+      },
+      "time": {"from": "now-1h", "to": "now"},
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "TaoNode Guardian — Anomaly Realtime",
+      "uid": "tng-anomaly-realtime",
+      "version": 1
+    }

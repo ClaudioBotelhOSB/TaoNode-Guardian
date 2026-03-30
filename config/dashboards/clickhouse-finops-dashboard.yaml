@@ -1,0 +1,435 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: taonode-guardian-clickhouse-finops-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/name: taonode-guardian
+    app.kubernetes.io/part-of: taonode-guardian
+data:
+  clickhouse-finops-cost.json: |
+    {
+      "annotations": {
+        "list": [
+          {
+            "builtIn": 1,
+            "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+            "enable": true,
+            "hide": true,
+            "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts",
+            "type": "dashboard"
+          }
+        ]
+      },
+      "description": "FinOps ROI, Spot savings, and infrastructure cost breakdown for the TaoNode Guardian Bittensor fleet.",
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+          "id": 20,
+          "title": "Fleet Cost Summary",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+          "description": "Total estimated monthly infrastructure cost across the entire fleet.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 500},
+                  {"color": "red", "value": 2000}
+                ]
+              },
+              "unit": "currencyUSD"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 1},
+          "id": 1,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+              "format": 0,
+              "queryType": "sql",
+              "rawSql": "SELECT\n  sum(estimated_monthly_cost_usd) AS value\nFROM (\n  SELECT\n    node_name,\n    argMax(estimated_monthly_cost_usd, timestamp) AS estimated_monthly_cost_usd\n  FROM taonode_guardian.finops_metrics\n  WHERE $__timeFilter(timestamp)\n  GROUP BY node_name\n)",
+              "refId": "A"
+            }
+          ],
+          "title": "Fleet Monthly Cost",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+          "description": "Average ROI across all nodes. Computed as tao_per_gpu_hour / cost_per_gpu_hour * 100.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "red", "value": null},
+                  {"color": "yellow", "value": 50},
+                  {"color": "green", "value": 100}
+                ]
+              },
+              "unit": "percent"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 1},
+          "id": 2,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["mean"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+              "format": 0,
+              "queryType": "sql",
+              "rawSql": "SELECT\n  avg(roi_percent) AS value\nFROM taonode_guardian.finops_metrics\nWHERE $__timeFilter(timestamp)",
+              "refId": "A"
+            }
+          ],
+          "title": "Fleet Avg ROI %",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+          "description": "Monthly cost saved vs equivalent On-Demand pricing. Assumes ~70% Spot discount.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [{"color": "green", "value": null}]
+              },
+              "unit": "currencyUSD"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 6, "x": 12, "y": 1},
+          "id": 3,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "value_and_name"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+              "format": 0,
+              "queryType": "sql",
+              "rawSql": "SELECT\n  round(sum(spot_cost) * (1/0.30 - 1), 2) AS value\nFROM (\n  SELECT\n    node_name,\n    argMax(estimated_monthly_cost_usd, timestamp) AS spot_cost\n  FROM taonode_guardian.finops_metrics\n  WHERE $__timeFilter(timestamp)\n    AND is_spot = true\n  GROUP BY node_name\n)",
+              "refId": "A"
+            }
+          ],
+          "title": "Spot Savings vs On-Demand",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+          "description": "Number of active Spot nodes vs On-Demand nodes.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "mappings": [
+                {"options": {"0": {"color": "red", "text": "0"}, "1": {"color": "green", "text": "1+"}}, "type": "value"}
+              ],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [{"color": "blue", "value": null}]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 6, "x": 18, "y": 1},
+          "id": 4,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": true},
+            "textMode": "value_and_name"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+              "format": 0,
+              "queryType": "sql",
+              "rawSql": "SELECT\n  if(is_spot, 'Spot', 'On-Demand') AS name,\n  count(DISTINCT node_name) AS value\nFROM taonode_guardian.finops_metrics\nWHERE $__timeFilter(timestamp)\nGROUP BY is_spot",
+              "refId": "A"
+            }
+          ],
+          "title": "Spot vs On-Demand Nodes",
+          "type": "stat"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5},
+          "id": 21,
+          "title": "Cost Trends",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+          "description": "Estimated monthly cost per node over time. Useful for detecting cost regressions after config changes.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "fillOpacity": 8,
+                "gradientMode": "none",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineWidth": 2,
+                "spanNulls": false
+              },
+              "unit": "currencyUSD"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+          "id": 5,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "mean"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+              "format": 1,
+              "queryType": "sql",
+              "rawSql": "SELECT\n  toStartOfInterval(timestamp, INTERVAL $__interval_s SECOND) AS time,\n  node_name,\n  avg(estimated_monthly_cost_usd) AS value\nFROM taonode_guardian.finops_metrics\nWHERE $__timeFilter(timestamp)\n  AND ($node_name = 'All' OR node_name = $node_name)\nGROUP BY time, node_name\nORDER BY time ASC",
+              "refId": "A"
+            }
+          ],
+          "title": "Monthly Cost per Node (USD)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+          "description": "ROI % trend per node. Falling ROI indicates degraded mining output relative to cost.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "fillOpacity": 8,
+                "gradientMode": "none",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineWidth": 2,
+                "spanNulls": false,
+                "thresholdsStyle": {"mode": "line"}
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "red", "value": null},
+                  {"color": "yellow", "value": 50},
+                  {"color": "green", "value": 100}
+                ]
+              },
+              "unit": "percent"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+          "id": 6,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "mean"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+              "format": 1,
+              "queryType": "sql",
+              "rawSql": "SELECT\n  toStartOfInterval(timestamp, INTERVAL $__interval_s SECOND) AS time,\n  node_name,\n  avg(roi_percent) AS value\nFROM taonode_guardian.finops_metrics\nWHERE $__timeFilter(timestamp)\n  AND ($node_name = 'All' OR node_name = $node_name)\nGROUP BY time, node_name\nORDER BY time ASC",
+              "refId": "A"
+            }
+          ],
+          "title": "ROI % Trend",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 14},
+          "id": 22,
+          "title": "Node Cost Breakdown",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+          "description": "Latest estimated monthly cost per node, sorted descending. Identify highest-cost nodes.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisColorMode": "text",
+                "axisLabel": "USD / month",
+                "axisSoftMin": 0,
+                "fillOpacity": 80,
+                "gradientMode": "none",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineWidth": 1
+              },
+              "unit": "currencyUSD"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 15},
+          "id": 7,
+          "options": {
+            "barRadius": 0.05,
+            "barWidth": 0.7,
+            "fullHighlight": false,
+            "groupWidth": 0.7,
+            "legend": {"displayMode": "list", "placement": "bottom"},
+            "orientation": "horizontal",
+            "showValue": "auto",
+            "stacking": "none",
+            "tooltip": {"mode": "single", "sort": "none"},
+            "xTickLabelMaxLength": 20,
+            "xTickLabelRotation": 0
+          },
+          "targets": [
+            {
+              "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+              "format": 0,
+              "queryType": "sql",
+              "rawSql": "SELECT\n  node_name,\n  argMax(estimated_monthly_cost_usd, timestamp) AS cost\nFROM taonode_guardian.finops_metrics\nWHERE $__timeFilter(timestamp)\n  AND ($node_name = 'All' OR node_name = $node_name)\nGROUP BY node_name\nORDER BY cost DESC",
+              "refId": "A"
+            }
+          ],
+          "title": "Cost per Node (latest)",
+          "type": "barchart"
+        },
+        {
+          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+          "description": "Full FinOps breakdown table: cost, ROI, GPU hours, TAO/GPU·h, Spot status.",
+          "fieldConfig": {
+            "defaults": {"custom": {"align": "auto", "cellOptions": {"type": "auto"}, "inspect": false}},
+            "overrides": [
+              {
+                "matcher": {"id": "byName", "options": "estimated_monthly_cost_usd"},
+                "properties": [
+                  {"id": "displayName", "value": "Cost/mo (USD)"},
+                  {"id": "unit", "value": "currencyUSD"},
+                  {"id": "custom.width", "value": 130}
+                ]
+              },
+              {
+                "matcher": {"id": "byName", "options": "roi_percent"},
+                "properties": [
+                  {"id": "displayName", "value": "ROI %"},
+                  {"id": "unit", "value": "percent"},
+                  {"id": "custom.cellOptions", "value": {"type": "color-background", "mode": "gradient"}},
+                  {"id": "thresholds", "value": {
+                    "mode": "absolute",
+                    "steps": [
+                      {"color": "red", "value": null},
+                      {"color": "yellow", "value": 50},
+                      {"color": "green", "value": 100}
+                    ]
+                  }}
+                ]
+              },
+              {
+                "matcher": {"id": "byName", "options": "tao_per_gpu_hour"},
+                "properties": [
+                  {"id": "displayName", "value": "TAO/GPU·h"},
+                  {"id": "decimals", "value": 4}
+                ]
+              },
+              {
+                "matcher": {"id": "byName", "options": "is_spot"},
+                "properties": [
+                  {"id": "displayName", "value": "Spot?"},
+                  {"id": "custom.width", "value": 70},
+                  {"id": "mappings", "value": [
+                    {"options": {"false": {"color": "blue", "text": "On-Demand"}, "true": {"color": "green", "text": "Spot"}}, "type": "value"}
+                  ]}
+                ]
+              }
+            ]
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 15},
+          "id": 8,
+          "options": {
+            "cellHeight": "sm",
+            "footer": {"countRows": false, "enablePagination": false, "show": false},
+            "showHeader": true,
+            "sortBy": [{"desc": true, "displayName": "Cost/mo (USD)"}]
+          },
+          "targets": [
+            {
+              "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+              "format": 0,
+              "queryType": "sql",
+              "rawSql": "SELECT\n  node_name,\n  network,\n  role,\n  argMax(estimated_monthly_cost_usd, timestamp) AS estimated_monthly_cost_usd,\n  avg(roi_percent) AS roi_percent,\n  avg(tao_per_gpu_hour) AS tao_per_gpu_hour,\n  any(is_spot) AS is_spot,\n  argMax(gpu_count, timestamp) AS gpu_count\nFROM taonode_guardian.finops_metrics\nWHERE $__timeFilter(timestamp)\n  AND ($node_name = 'All' OR node_name = $node_name)\nGROUP BY node_name, network, role\nORDER BY estimated_monthly_cost_usd DESC",
+              "refId": "A"
+            }
+          ],
+          "title": "Node FinOps Table",
+          "type": "table"
+        }
+      ],
+      "refresh": "5m",
+      "schemaVersion": 39,
+      "tags": ["taonode-guardian", "finops", "clickhouse", "cost", "roi"],
+      "templating": {
+        "list": [
+          {
+            "current": {},
+            "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+            "definition": "SELECT DISTINCT node_name FROM taonode_guardian.finops_metrics ORDER BY node_name",
+            "hide": 0,
+            "includeAll": true,
+            "label": "Node",
+            "multi": false,
+            "name": "node_name",
+            "options": [],
+            "query": "SELECT DISTINCT node_name FROM taonode_guardian.finops_metrics ORDER BY node_name",
+            "refresh": 2,
+            "sort": 1,
+            "type": "query"
+          }
+        ]
+      },
+      "time": {"from": "now-24h", "to": "now"},
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "TaoNode Guardian — FinOps Cost & ROI",
+      "uid": "tng-finops-cost",
+      "version": 1
+    }

@@ -244,6 +244,30 @@ kubectl wait pods -n kube-system -l app=clickhouse-operator \
 log "STEP 8: Applying Root App-of-Apps"
 kubectl apply -n argocd -f "${REPO_DIR}/argocd/apps/root.yaml"
 
+# ── STEP 9: Wait for ClickHouse and seed demo data ──────────────────────────
+# ArgoCD will deploy the ClickHouseInstallation CR (wave 1). We wait for the
+# pod to be Ready, then seed the taonode_guardian database with demo data.
+log "STEP 9: Waiting for ClickHouse pod (up to 5 min)"
+CH_READY=false
+for i in $(seq 1 60); do
+  if kubectl get pod chi-clickhouse-taonode-taonode-0-0-0 -n clickhouse \
+       --no-headers 2>/dev/null | grep -q '1/1.*Running'; then
+    CH_READY=true
+    break
+  fi
+  sleep 5
+done
+
+if [ "${CH_READY}" = "true" ]; then
+  log "STEP 9: ClickHouse is Ready — seeding demo data"
+  kubectl exec -i -n clickhouse chi-clickhouse-taonode-taonode-0-0-0 -- \
+    clickhouse-client --multiquery < "${REPO_DIR}/hack/clickhouse-seed.sql"
+  log "STEP 9: Seed data loaded"
+else
+  log "STEP 9: WARNING — ClickHouse not ready after 5 min, skipping seed. Run manually:"
+  log "  kubectl exec -i -n clickhouse chi-clickhouse-taonode-taonode-0-0-0 -- clickhouse-client --multiquery < ${REPO_DIR}/hack/clickhouse-seed.sql"
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 PUBLIC_IP=$(curl -sf http://169.254.169.254/latest/meta-data/public-ipv4 || echo "<public-ip>")
 

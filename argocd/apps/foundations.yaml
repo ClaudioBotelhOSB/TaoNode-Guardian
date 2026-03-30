@@ -59,6 +59,17 @@ spec:
               existingSecret: grafana-admin-secret
               userKey: admin-user
               passwordKey: admin-password
+            additionalDataSources:
+              - name: ClickHouse
+                type: grafana-clickhouse-datasource
+                uid: clickhouse-taonode
+                access: proxy
+                url: clickhouse-clickhouse-taonode.clickhouse.svc:9000
+                jsonData:
+                  defaultDatabase: taonode_guardian
+                  port: 9000
+                  protocol: native
+                isDefault: false
           prometheus:
             prometheusSpec:
               scrapeInterval: 30s
