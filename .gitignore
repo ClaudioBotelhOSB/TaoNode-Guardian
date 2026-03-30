@@ -33,3 +33,4 @@ infra/aws/tfplan
 secrets-lint-errors.log
 go-lint-erros.log
 manual_commands.txt
+*.txt

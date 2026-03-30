@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -rn \"ClaudioBotelhOSB\\\\|ghcr\\\\.io.*probe\\\\|chain.probe.*image\\\\|ProbeImage\\\\|probe_image\\\\|PROBE\" c:/Users/botel/Documents/taonode-guardian --include=*.go)",
+      "Bash(find c:/Users/botel/Documents/taonode-guardian/internal -name *.go)",
+      "Bash(xargs grep:*)",
+      "Bash(go build:*)",
+      "Bash(cmd.exe /c \"where go 2>&1\")",
+      "Bash(cmd.exe /c \"go version 2>&1\")",
+      "Bash(cmd.exe /c \"cd C:\\\\Users\\\\botel\\\\Documents\\\\taonode-guardian && go build ./internal/controller/... 2>&1\")",
+      "Bash(cmd.exe /c \"go build ./internal/controller/...\")",
+      "Bash(cmd.exe /c \"go build ./internal/...\")",
+      "Bash(cmd.exe /c \"go build ./... 2>&1\")",
+      "Bash(cmd.exe /c \"dir c:\\\\Users\\\\botel\\\\Documents\\\\taonode-guardian\\\\infra\\\\aws\\\\ /b\")"
+    ]
+  }
+}
