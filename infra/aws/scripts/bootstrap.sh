@@ -83,10 +83,18 @@ else
 fi
 
 # ── STEP 2: K3s (no traefik — Klipper servicelb enabled for LoadBalancer) ────
-log "STEP 2: Installing K3s"
-curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server \
-  --disable traefik \
-  --write-kubeconfig-mode 644" sh -
+# --tls-san adds the EC2 public IP to the K3s TLS certificate so that kubectl
+# from outside the EC2 works without --insecure-skip-tls-verify.
+log "STEP 2: Fetching EC2 public IP for TLS SAN"
+EC2_PUBLIC_IP=$(curl -sf --max-time 5 http://169.254.169.254/latest/meta-data/public-ipv4 || echo "")
+if [[ -z "$EC2_PUBLIC_IP" ]]; then
+  log "WARNING: could not fetch public IP from metadata — kubectl from outside will require --insecure-skip-tls-verify"
+fi
+
+log "STEP 2: Installing K3s (tls-san: ${EC2_PUBLIC_IP:-none})"
+EXEC_ARGS="server --disable traefik --write-kubeconfig-mode 644"
+[[ -n "$EC2_PUBLIC_IP" ]] && EXEC_ARGS="${EXEC_ARGS} --tls-san ${EC2_PUBLIC_IP}"
+curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="${EXEC_ARGS}" sh -
 
 # Persist KUBECONFIG for interactive SSH sessions
 echo 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml' > /etc/profile.d/k3s.sh
@@ -126,20 +134,24 @@ kubectl apply --server-side -n argocd \
 log "STEP 5: Waiting for ArgoCD server"
 kubectl rollout status deployment argocd-server -n argocd --timeout=600s
 
-log "STEP 5: Patching argocd-server to LoadBalancer (port 443 only)"
+log "STEP 5: Patching argocd-server to LoadBalancer (HTTP port 8080)"
 kubectl patch svc argocd-server -n argocd --type='merge' -p '{
   "spec": {
     "type": "LoadBalancer",
     "ports": [
       {
-        "name": "https",
-        "port": 443,
+        "name": "http",
+        "port": 8080,
         "protocol": "TCP",
         "targetPort": 8080
       }
     ]
   }
 }'
+
+log "STEP 5: Disabling argocd-server TLS (HTTP-only demo mode)"
+kubectl patch deployment argocd-server -n argocd --type='json' \
+  -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--insecure"}]'
 
 # ── STEP 6: Pre-ArgoCD secrets ────────────────────────────────────────────────
 # These secrets must exist BEFORE ArgoCD syncs the child apps because:
@@ -233,8 +245,8 @@ log "  Grafana admin password:"
 log "    cat /var/lib/taonode-guardian/grafana-admin-password"
 log ""
 log "  Access URLs (Klipper LoadBalancer — run infra/aws/scripts/open-demo-ports.sh to open SG):"
-log "    Grafana    → http://${PUBLIC_IP}"
-log "    ArgoCD     → https://${PUBLIC_IP}"
+log "    Grafana    → http://${PUBLIC_IP}:3000"
+log "    ArgoCD     → http://${PUBLIC_IP}:8080"
 log "    ClickHouse → http://${PUBLIC_IP}:8123/play"
 log ""
 log "  Watch ArgoCD sync:"

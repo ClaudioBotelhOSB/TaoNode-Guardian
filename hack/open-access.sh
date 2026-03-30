@@ -29,8 +29,8 @@ ARGOCD_TIMEOUT="${ARGOCD_TIMEOUT:-300}"  # segundos aguardando ArgoCD
 export KUBECONFIG
 
 # ── Cores ─────────────────────────────────────────────────────────────────────
-BOLD='\033[1m'; RESET='\033[0m'
-CYAN='\033[1;36m'; GREEN='\033[1;32m'; YELLOW='\033[1;33m'; RED='\033[1;31m'
+BOLD=$'\033[1m'; RESET=$'\033[0m'
+CYAN=$'\033[1;36m'; GREEN=$'\033[1;32m'; YELLOW=$'\033[1;33m'; RED=$'\033[1;31m'
 
 log()    { printf "${CYAN}[access]${RESET} %s\n" "$*"; }
 ok()     { printf "${GREEN}[access] ✓ %s${RESET}\n" "$*"; }
@@ -158,17 +158,21 @@ validate_cidr "$MY_CIDR"
 SG_ID="$(resolve_sg_id)"
 log "SG: ${SG_ID} | CIDR: ${MY_CIDR}"
 
-authorize_port "$SG_ID" "$MY_CIDR"  80   "Grafana LB - demo"
-authorize_port "$SG_ID" "$MY_CIDR" 443   "ArgoCD LB - demo"
+authorize_port "$SG_ID" "$MY_CIDR" 3000  "Grafana LB - demo"
+authorize_port "$SG_ID" "$MY_CIDR" 8080  "ArgoCD HTTP - demo"
 authorize_port "$SG_ID" "$MY_CIDR" 8123  "ClickHouse HTTP - demo"
 
 # ── 3. Aguardar ArgoCD ────────────────────────────────────────────────────────
 header "3/5 — Aguardando ArgoCD"
 log "timeout: ${ARGOCD_TIMEOUT}s (ARGOCD_TIMEOUT para ajustar)"
 
-if ! kubectl get ns argocd &>/dev/null; then
-  fail "namespace 'argocd' não encontrado. Verifique o KUBECONFIG: ${KUBECONFIG}"
-fi
+log "Aguardando namespace argocd existir..."
+DEADLINE=$(( $(date +%s) + ARGOCD_TIMEOUT ))
+until kubectl get ns argocd > /dev/null 2>&1; do
+  [ "$(date +%s)" -ge "$DEADLINE" ] && fail "timeout: namespace argocd nao apareceu. Verifique KUBECONFIG=${KUBECONFIG}"
+  sleep 5
+done
+ok "namespace argocd encontrado"
 
 kubectl wait pods \
   -n argocd \
@@ -176,7 +180,7 @@ kubectl wait pods \
   --for=condition=Ready \
   --timeout="${ARGOCD_TIMEOUT}s" \
   && ok "argocd-server pronto" \
-  || fail "argocd-server não ficou Ready em ${ARGOCD_TIMEOUT}s"
+  || fail "argocd-server nao ficou Ready em ${ARGOCD_TIMEOUT}s"
 
 # ── 4. Extrair senhas ─────────────────────────────────────────────────────────
 header "4/5 — Senhas"
@@ -210,23 +214,21 @@ fi
 # ── 5. Resumo de Acesso ───────────────────────────────────────────────────────
 header "5/5 — Resumo de Acesso"
 
-cat <<EOF
-
-${BOLD}┌─────────────────────────────────────────────────────────┐${RESET}
-${BOLD}│           TaoNode Guardian — Acesso Demo                │${RESET}
-${BOLD}├─────────────────────────────────────────────────────────┤${RESET}
-${BOLD}│ Grafana   ${RESET}  http://${EC2_IP}
-${BOLD}│           ${RESET}  Usuário : admin
-${BOLD}│           ${RESET}  Senha   : ${GREEN}${BOLD}${GRAFANA_PASSWORD}${RESET}
-${BOLD}│                                                         │${RESET}
-${BOLD}│ ArgoCD    ${RESET}  https://${EC2_IP}
-${BOLD}│           ${RESET}  Usuário : admin
-${BOLD}│           ${RESET}  Senha   : ${GREEN}${BOLD}${ARGOCD_PASSWORD}${RESET}
-${BOLD}│                                                         │${RESET}
-${BOLD}│ ClickHouse${RESET}  http://${EC2_IP}:8123/play
-${BOLD}└─────────────────────────────────────────────────────────┘${RESET}
-
-Para revogar as regras do SG após a demo:
-  bash infra/aws/scripts/open-demo-ports.sh  # usa os comandos revoke impressos
-
-EOF
+echo ""
+echo "  TaoNode Guardian — Acesso Demo"
+echo "  ================================================"
+echo ""
+echo "  Grafana     http://${EC2_IP}:3000"
+echo "               Usuario: admin"
+echo "               Senha:   ${GRAFANA_PASSWORD}"
+echo ""
+echo "  ArgoCD      http://${EC2_IP}:8080"
+echo "               Usuario: admin"
+echo "               Senha:   ${ARGOCD_PASSWORD}"
+echo ""
+echo "  ClickHouse  http://${EC2_IP}:8123/play"
+echo ""
+echo "  Kubecost    http://${EC2_IP}:9090"
+echo ""
+echo "  ================================================"
+echo ""
