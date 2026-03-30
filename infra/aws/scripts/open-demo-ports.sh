@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # infra/aws/scripts/open-demo-ports.sh
 #
-# Abre as portas da demo (80, 8123, 9000) no Security Group da EC2,
+# Abre as portas da demo (80, 443, 8123, 9000) no Security Group da EC2,
 # restritas ao IP público atual (ou ao CIDR passado como argumento).
 #
 # Uso:
@@ -124,17 +124,25 @@ echo ""
 
 # ── Abrir portas ─────────────────────────────────────────────────────────────
 authorize_port "$SG_ID" "$MY_CIDR"  80   "Grafana LB - demo"
+authorize_port "$SG_ID" "$MY_CIDR"  443  "ArgoCD HTTPS - demo"
 authorize_port "$SG_ID" "$MY_CIDR"  8123 "ClickHouse HTTP - demo"
 authorize_port "$SG_ID" "$MY_CIDR"  9000 "ClickHouse Native - demo"
 
 # ── Resumo + comandos de cleanup ─────────────────────────────────────────────
 cat <<EOF
 
-Done. Ports 80, 8123, 9000 open for ${MY_CIDR}.
+Done. Ports 80, 443, 8123, 9000 open for ${MY_CIDR}.
+
+Access URLs:
+  Grafana:    http://<ec2-public-ip>
+  ArgoCD:     https://<ec2-public-ip>
+  ClickHouse: http://<ec2-public-ip>:8123/play
 
 Revoke after the demo:
   aws ec2 revoke-security-group-ingress --region ${REGION} --group-id ${SG_ID} \\
     --ip-permissions 'IpProtocol=tcp,FromPort=80,ToPort=80,IpRanges=[{CidrIp=${MY_CIDR}}]'
+  aws ec2 revoke-security-group-ingress --region ${REGION} --group-id ${SG_ID} \\
+    --ip-permissions 'IpProtocol=tcp,FromPort=443,ToPort=443,IpRanges=[{CidrIp=${MY_CIDR}}]'
   aws ec2 revoke-security-group-ingress --region ${REGION} --group-id ${SG_ID} \\
     --ip-permissions 'IpProtocol=tcp,FromPort=8123,ToPort=8123,IpRanges=[{CidrIp=${MY_CIDR}}]'
   aws ec2 revoke-security-group-ingress --region ${REGION} --group-id ${SG_ID} \\

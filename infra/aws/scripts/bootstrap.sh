@@ -126,24 +126,16 @@ kubectl apply --server-side -n argocd \
 log "STEP 5: Waiting for ArgoCD server"
 kubectl rollout status deployment argocd-server -n argocd --timeout=600s
 
-log "STEP 5: Patching argocd-server to NodePort 30080 (HTTPS)"
+log "STEP 5: Patching argocd-server to LoadBalancer (port 443 only)"
 kubectl patch svc argocd-server -n argocd --type='merge' -p '{
   "spec": {
-    "type": "NodePort",
+    "type": "LoadBalancer",
     "ports": [
-      {
-        "name": "http",
-        "port": 80,
-        "protocol": "TCP",
-        "targetPort": 8080,
-        "nodePort": 30079
-      },
       {
         "name": "https",
         "port": 443,
         "protocol": "TCP",
-        "targetPort": 8080,
-        "nodePort": 30080
+        "targetPort": 8080
       }
     ]
   }
@@ -240,12 +232,10 @@ log ""
 log "  Grafana admin password:"
 log "    cat /var/lib/taonode-guardian/grafana-admin-password"
 log ""
-log "  Access URLs (Klipper LoadBalancer — run open-demo-ports.sh first):"
-log "    Grafana   → http://${PUBLIC_IP}:80"
-log "    ClickHouse HTTP  → http://${PUBLIC_IP}:8123/play"
-log "    ClickHouse Native → ${PUBLIC_IP}:9000"
-log "  ArgoCD SSH tunnel:"
-log "    ssh -N -L 30080:localhost:30080 ubuntu@${PUBLIC_IP}  # ArgoCD → https://localhost:30080"
+log "  Access URLs (Klipper LoadBalancer — run infra/aws/scripts/open-demo-ports.sh to open SG):"
+log "    Grafana    → http://${PUBLIC_IP}"
+log "    ArgoCD     → https://${PUBLIC_IP}"
+log "    ClickHouse → http://${PUBLIC_IP}:8123/play"
 log ""
 log "  Watch ArgoCD sync:"
 log "    kubectl get applications -n argocd -w"
