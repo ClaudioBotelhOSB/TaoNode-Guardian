@@ -85,23 +85,7 @@ func (r *TaoNodeReconciler) setCondition(
 	meta.SetStatusCondition(&tn.Status.Conditions, newCondition)
 }
 
-// conditionMatches reports whether a condition already exists with the exact
-// status, reason, and message we intend to persist. This lets the reconciler
-// avoid status-update loops when it enters a terminal or wait-for-human state.
-func conditionMatches(
-	conditions []metav1.Condition,
-	condType string,
-	status metav1.ConditionStatus,
-	reason, message string,
-) bool {
-	existing := meta.FindStatusCondition(conditions, condType)
-	if existing == nil {
-		return false
-	}
-	return existing.Status == status &&
-		existing.Reason == reason &&
-		existing.Message == message
-}
+
 
 // imageForNode returns the container image to use for the node workload.
 // Spec.Image takes precedence; falls back to the operator's DefaultImage.
