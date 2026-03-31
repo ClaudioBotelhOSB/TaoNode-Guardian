@@ -1,0 +1,205 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: taonode-guardian-finops-capacity-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/name: taonode-guardian
+    app.kubernetes.io/part-of: taonode-guardian
+data:
+  tng-finops-capacity.json: |
+    {
+      "annotations": {
+        "list": [
+          {
+            "builtIn": 1,
+            "datasource": "-- Grafana --",
+            "enable": true,
+            "hide": true,
+            "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts",
+            "type": "dashboard"
+          }
+        ]
+      },
+      "description": "Infrastructure capacity for the TaoNode Guardian fleet — Disk & GPU utilization from ClickHouse.",
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "datasource": "Clickhouse",
+          "description": "Disk usage % per node. > 80% triggers auto-expand.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "fillOpacity": 10,
+                "gradientMode": "opacity",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineWidth": 2,
+                "spanNulls": false,
+                "thresholdsStyle": {"mode": "line+area"}
+              },
+              "max": 100,
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green",  "value": null},
+                  {"color": "yellow", "value": 60},
+                  {"color": "orange", "value": 80},
+                  {"color": "red",    "value": 90}
+                ]
+              },
+              "unit": "percent"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 10, "w": 24, "x": 0, "y": 0},
+          "id": 1,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max", "mean"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": "Clickhouse",
+              "format": 1,
+              "queryType": "sql",
+              "rawSql": "SELECT\n  timestamp AS time,\n  disk_usage_percent AS value\nFROM taonode_guardian.chain_telemetry\nWHERE $__timeFilter(timestamp)\nORDER BY timestamp ASC\nLIMIT 500",
+              "refId": "A"
+            }
+          ],
+          "title": "Disk Usage % Over Time",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Clickhouse",
+          "description": "GPU utilization % per node. Sustained > 95% may indicate thermal throttling.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineWidth": 2,
+                "spanNulls": false,
+                "thresholdsStyle": {"mode": "line"}
+              },
+              "max": 100,
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green",  "value": null},
+                  {"color": "yellow", "value": 85},
+                  {"color": "red",    "value": 95}
+                ]
+              },
+              "unit": "percent"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 10, "w": 24, "x": 0, "y": 10},
+          "id": 2,
+          "options": {
+            "legend": {"calcs": ["lastNotNull", "max", "mean"], "displayMode": "table", "placement": "bottom"},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "targets": [
+            {
+              "datasource": "Clickhouse",
+              "format": 1,
+              "queryType": "sql",
+              "rawSql": "SELECT\n  timestamp AS time,\n  gpu_utilization_percent AS value\nFROM taonode_guardian.chain_telemetry\nWHERE $__timeFilter(timestamp)\nORDER BY timestamp ASC\nLIMIT 500",
+              "refId": "A"
+            }
+          ],
+          "title": "GPU Utilization % Over Time",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Clickhouse",
+          "description": "Latest Disk & GPU usage — current snapshot.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "custom": {"align": "auto", "cellOptions": {"type": "auto"}, "inspect": false},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [{"color": "green", "value": null}]
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {"id": "byName", "options": "disk_usage_percent"},
+                "properties": [
+                  {"id": "displayName", "value": "Disk %"},
+                  {"id": "unit", "value": "percent"},
+                  {"id": "custom.cellOptions", "value": {"type": "color-background", "mode": "gradient"}},
+                  {"id": "thresholds", "value": {
+                    "mode": "absolute",
+                    "steps": [
+                      {"color": "green",  "value": null},
+                      {"color": "yellow", "value": 60},
+                      {"color": "orange", "value": 80},
+                      {"color": "red",    "value": 90}
+                    ]
+                  }}
+                ]
+              },
+              {
+                "matcher": {"id": "byName", "options": "gpu_utilization_percent"},
+                "properties": [
+                  {"id": "displayName", "value": "GPU %"},
+                  {"id": "unit", "value": "percent"},
+                  {"id": "custom.cellOptions", "value": {"type": "color-background", "mode": "gradient"}},
+                  {"id": "thresholds", "value": {
+                    "mode": "absolute",
+                    "steps": [
+                      {"color": "green",  "value": null},
+                      {"color": "yellow", "value": 85},
+                      {"color": "red",    "value": 95}
+                    ]
+                  }}
+                ]
+              }
+            ]
+          },
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 20},
+          "id": 3,
+          "options": {
+            "cellHeight": "sm",
+            "footer": {"countRows": false, "enablePagination": false, "show": false},
+            "showHeader": true,
+            "sortBy": [{"desc": true, "displayName": "Disk %"}]
+          },
+          "targets": [
+            {
+              "datasource": "Clickhouse",
+              "format": 0,
+              "queryType": "sql",
+              "rawSql": "SELECT\n  timestamp,\n  disk_usage_percent,\n  gpu_utilization_percent\nFROM taonode_guardian.chain_telemetry\nORDER BY timestamp DESC\nLIMIT 500",
+              "refId": "A"
+            }
+          ],
+          "title": "Capacity Snapshot Table",
+          "type": "table"
+        }
+      ],
+      "refresh": "1m",
+      "schemaVersion": 39,
+      "tags": ["taonode-guardian", "finops", "capacity", "clickhouse"],
+      "templating": {"list": []},
+      "time": {"from": "now-3h", "to": "now"},
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "TaoNode FinOps & Capacity",
+      "uid": "tng-finops-capacity",
+      "version": 1
+    }
