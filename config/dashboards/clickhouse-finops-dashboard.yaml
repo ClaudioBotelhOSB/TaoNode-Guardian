@@ -230,7 +230,7 @@ data:
               "datasource": "Clickhouse",
               "format": 1,
               "queryType": "sql",
-              "rawSql": "SELECT\n  toStartOfInterval(timestamp, INTERVAL $__interval_s SECOND) AS time,\n  node_name,\n  avg(estimated_monthly_cost_usd) AS value\nFROM taonode_guardian.finops_metrics\nWHERE $__timeFilter(timestamp)\n  AND ($node_name = 'All' OR node_name = $node_name)\nGROUP BY time, node_name\nORDER BY time ASC",
+              "rawSql": "SELECT\n  toStartOfInterval(timestamp, INTERVAL $__interval_s SECOND) AS time,\n  node_name,\n  avg(estimated_monthly_cost_usd) AS value\nFROM taonode_guardian.finops_metrics\nWHERE $__timeFilter(timestamp)\n  AND node_name IN ($node_name)\nGROUP BY time, node_name\nORDER BY time ASC",
               "refId": "A"
             }
           ],
@@ -274,7 +274,7 @@ data:
               "datasource": "Clickhouse",
               "format": 1,
               "queryType": "sql",
-              "rawSql": "SELECT\n  toStartOfInterval(timestamp, INTERVAL $__interval_s SECOND) AS time,\n  node_name,\n  avg(roi_percent) AS value\nFROM taonode_guardian.finops_metrics\nWHERE $__timeFilter(timestamp)\n  AND ($node_name = 'All' OR node_name = $node_name)\nGROUP BY time, node_name\nORDER BY time ASC",
+              "rawSql": "SELECT\n  toStartOfInterval(timestamp, INTERVAL $__interval_s SECOND) AS time,\n  node_name,\n  avg(roi_percent) AS value\nFROM taonode_guardian.finops_metrics\nWHERE $__timeFilter(timestamp)\n  AND node_name IN ($node_name)\nGROUP BY time, node_name\nORDER BY time ASC",
               "refId": "A"
             }
           ],
@@ -327,7 +327,7 @@ data:
               "datasource": "Clickhouse",
               "format": 0,
               "queryType": "sql",
-              "rawSql": "SELECT\n  node_name,\n  argMax(estimated_monthly_cost_usd, timestamp) AS cost\nFROM taonode_guardian.finops_metrics\nWHERE $__timeFilter(timestamp)\n  AND ($node_name = 'All' OR node_name = $node_name)\nGROUP BY node_name\nORDER BY cost DESC",
+              "rawSql": "SELECT\n  node_name,\n  argMax(estimated_monthly_cost_usd, timestamp) AS cost\nFROM taonode_guardian.finops_metrics\nWHERE $__timeFilter(timestamp)\n  AND node_name IN ($node_name)\nGROUP BY node_name\nORDER BY cost DESC",
               "refId": "A"
             }
           ],
@@ -396,7 +396,7 @@ data:
               "datasource": "Clickhouse",
               "format": 0,
               "queryType": "sql",
-              "rawSql": "SELECT\n  node_name,\n  network,\n  role,\n  argMax(estimated_monthly_cost_usd, timestamp) AS estimated_monthly_cost_usd,\n  avg(roi_percent) AS roi_percent,\n  avg(tao_per_gpu_hour) AS tao_per_gpu_hour,\n  any(is_spot) AS is_spot,\n  argMax(gpu_count, timestamp) AS gpu_count\nFROM taonode_guardian.finops_metrics\nWHERE $__timeFilter(timestamp)\n  AND ($node_name = 'All' OR node_name = $node_name)\nGROUP BY node_name, network, role\nORDER BY estimated_monthly_cost_usd DESC",
+              "rawSql": "SELECT\n  node_name,\n  network,\n  role,\n  argMax(estimated_monthly_cost_usd, timestamp) AS estimated_monthly_cost_usd,\n  avg(roi_percent) AS roi_percent,\n  avg(tao_per_gpu_hour) AS tao_per_gpu_hour,\n  any(is_spot) AS is_spot,\n  argMax(gpu_count, timestamp) AS gpu_count\nFROM taonode_guardian.finops_metrics\nWHERE $__timeFilter(timestamp)\n  AND node_name IN ($node_name)\nGROUP BY node_name, network, role\nORDER BY estimated_monthly_cost_usd DESC",
               "refId": "A"
             }
           ],
@@ -416,7 +416,7 @@ data:
             "hide": 0,
             "includeAll": true,
             "label": "Node",
-            "multi": false,
+            "multi": true,
             "name": "node_name",
             "options": [],
             "query": "SELECT DISTINCT node_name FROM taonode_guardian.finops_metrics ORDER BY node_name",

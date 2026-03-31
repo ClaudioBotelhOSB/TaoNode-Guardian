@@ -77,7 +77,7 @@ data:
               "datasource": "Clickhouse",
               "format": 1,
               "queryType": "sql",
-              "rawSql": "SELECT\n  toStartOfInterval(timestamp, INTERVAL $__interval_s SECOND) AS time,\n  node_name,\n  avg(block_lag) AS value\nFROM taonode_guardian.chain_telemetry\nWHERE $__timeFilter(timestamp)\n  AND ($node_name = 'All' OR node_name = $node_name)\nGROUP BY time, node_name\nORDER BY time ASC",
+              "rawSql": "SELECT\n  toStartOfInterval(timestamp, INTERVAL $__interval_s SECOND) AS time,\n  node_name,\n  avg(block_lag) AS value\nFROM taonode_guardian.chain_telemetry\nWHERE $__timeFilter(timestamp)\n  AND node_name IN ($node_name)\nGROUP BY time, node_name\nORDER BY time ASC",
               "refId": "A"
             }
           ],
@@ -121,7 +121,7 @@ data:
               "datasource": "Clickhouse",
               "format": 1,
               "queryType": "sql",
-              "rawSql": "SELECT\n  toStartOfInterval(timestamp, INTERVAL $__interval_s SECOND) AS time,\n  node_name,\n  avg(peer_count) AS value\nFROM taonode_guardian.chain_telemetry\nWHERE $__timeFilter(timestamp)\n  AND ($node_name = 'All' OR node_name = $node_name)\nGROUP BY time, node_name\nORDER BY time ASC",
+              "rawSql": "SELECT\n  toStartOfInterval(timestamp, INTERVAL $__interval_s SECOND) AS time,\n  node_name,\n  avg(peer_count) AS value\nFROM taonode_guardian.chain_telemetry\nWHERE $__timeFilter(timestamp)\n  AND node_name IN ($node_name)\nGROUP BY time, node_name\nORDER BY time ASC",
               "refId": "A"
             }
           ],
@@ -175,7 +175,7 @@ data:
               "datasource": "Clickhouse",
               "format": 1,
               "queryType": "sql",
-              "rawSql": "SELECT\n  toStartOfInterval(timestamp, INTERVAL $__interval_s SECOND) AS time,\n  concat(node_name, '/', anomaly_type) AS metric,\n  avg(score) AS value\nFROM taonode_guardian.anomaly_scores\nWHERE $__timeFilter(timestamp)\n  AND ($node_name = 'All' OR node_name = $node_name)\nGROUP BY time, metric\nORDER BY time ASC",
+              "rawSql": "SELECT\n  toStartOfInterval(timestamp, INTERVAL $__interval_s SECOND) AS time,\n  concat(node_name, '/', anomaly_type) AS metric,\n  avg(score) AS value\nFROM taonode_guardian.anomaly_scores\nWHERE $__timeFilter(timestamp)\n  AND node_name IN ($node_name)\nGROUP BY time, metric\nORDER BY time ASC",
               "refId": "A"
             }
           ],
@@ -206,7 +206,7 @@ data:
               "datasource": "Clickhouse",
               "format": 0,
               "queryType": "sql",
-              "rawSql": "SELECT\n  anomaly_type AS name,\n  count() AS value\nFROM taonode_guardian.anomaly_scores\nWHERE $__timeFilter(timestamp)\n  AND score >= 0.4\n  AND ($node_name = 'All' OR node_name = $node_name)\nGROUP BY anomaly_type\nORDER BY value DESC",
+              "rawSql": "SELECT\n  anomaly_type AS name,\n  count() AS value\nFROM taonode_guardian.anomaly_scores\nWHERE $__timeFilter(timestamp)\n  AND score >= 0.4\n  AND node_name IN ($node_name)\nGROUP BY anomaly_type\nORDER BY value DESC",
               "refId": "A"
             }
           ],
@@ -263,7 +263,7 @@ data:
               "datasource": "Clickhouse",
               "format": 0,
               "queryType": "sql",
-              "rawSql": "SELECT\n  node_name,\n  argMax(disk_usage_percent, timestamp) AS value\nFROM taonode_guardian.chain_telemetry\nWHERE $__timeFilter(timestamp)\n  AND ($node_name = 'All' OR node_name = $node_name)\nGROUP BY node_name",
+              "rawSql": "SELECT\n  node_name,\n  argMax(disk_usage_percent, timestamp) AS value\nFROM taonode_guardian.chain_telemetry\nWHERE $__timeFilter(timestamp)\n  AND node_name IN ($node_name)\nGROUP BY node_name",
               "refId": "A"
             }
           ],
@@ -307,7 +307,7 @@ data:
               "datasource": "Clickhouse",
               "format": 0,
               "queryType": "sql",
-              "rawSql": "SELECT\n  timestamp,\n  node_name,\n  anomaly_type,\n  score,\n  detail\nFROM taonode_guardian.anomaly_scores\nWHERE $__timeFilter(timestamp)\n  AND score >= 0.4\n  AND ($node_name = 'All' OR node_name = $node_name)\nORDER BY timestamp DESC\nLIMIT 100",
+              "rawSql": "SELECT\n  timestamp,\n  node_name,\n  anomaly_type,\n  score,\n  detail\nFROM taonode_guardian.anomaly_scores\nWHERE $__timeFilter(timestamp)\n  AND score >= 0.4\n  AND node_name IN ($node_name)\nORDER BY timestamp DESC\nLIMIT 100",
               "refId": "A"
             }
           ],
@@ -327,7 +327,7 @@ data:
             "hide": 0,
             "includeAll": true,
             "label": "Node",
-            "multi": false,
+            "multi": true,
             "name": "node_name",
             "options": [],
             "query": "SELECT DISTINCT node_name FROM taonode_guardian.chain_telemetry ORDER BY node_name",
