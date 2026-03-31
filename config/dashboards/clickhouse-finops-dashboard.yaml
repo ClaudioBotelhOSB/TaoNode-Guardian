@@ -38,7 +38,7 @@ data:
           "type": "row"
         },
         {
-          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+          "datasource": "Clickhouse",
           "description": "Total estimated monthly infrastructure cost across the entire fleet.",
           "fieldConfig": {
             "defaults": {
@@ -68,7 +68,7 @@ data:
           },
           "targets": [
             {
-              "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+              "datasource": "Clickhouse",
               "format": 0,
               "queryType": "sql",
               "rawSql": "SELECT\n  sum(estimated_monthly_cost_usd) AS value\nFROM (\n  SELECT\n    node_name,\n    argMax(estimated_monthly_cost_usd, timestamp) AS estimated_monthly_cost_usd\n  FROM taonode_guardian.finops_metrics\n  WHERE $__timeFilter(timestamp)\n  GROUP BY node_name\n)",
@@ -79,7 +79,7 @@ data:
           "type": "stat"
         },
         {
-          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+          "datasource": "Clickhouse",
           "description": "Average ROI across all nodes. Computed as tao_per_gpu_hour / cost_per_gpu_hour * 100.",
           "fieldConfig": {
             "defaults": {
@@ -109,7 +109,7 @@ data:
           },
           "targets": [
             {
-              "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+              "datasource": "Clickhouse",
               "format": 0,
               "queryType": "sql",
               "rawSql": "SELECT\n  avg(roi_percent) AS value\nFROM taonode_guardian.finops_metrics\nWHERE $__timeFilter(timestamp)",
@@ -120,7 +120,7 @@ data:
           "type": "stat"
         },
         {
-          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+          "datasource": "Clickhouse",
           "description": "Monthly cost saved vs equivalent On-Demand pricing. Assumes ~70% Spot discount.",
           "fieldConfig": {
             "defaults": {
@@ -146,7 +146,7 @@ data:
           },
           "targets": [
             {
-              "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+              "datasource": "Clickhouse",
               "format": 0,
               "queryType": "sql",
               "rawSql": "SELECT\n  round(sum(spot_cost) * (1/0.30 - 1), 2) AS value\nFROM (\n  SELECT\n    node_name,\n    argMax(estimated_monthly_cost_usd, timestamp) AS spot_cost\n  FROM taonode_guardian.finops_metrics\n  WHERE $__timeFilter(timestamp)\n    AND is_spot = true\n  GROUP BY node_name\n)",
@@ -157,7 +157,7 @@ data:
           "type": "stat"
         },
         {
-          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+          "datasource": "Clickhouse",
           "description": "Number of active Spot nodes vs On-Demand nodes.",
           "fieldConfig": {
             "defaults": {
@@ -185,7 +185,7 @@ data:
           },
           "targets": [
             {
-              "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+              "datasource": "Clickhouse",
               "format": 0,
               "queryType": "sql",
               "rawSql": "SELECT\n  if(is_spot, 'Spot', 'On-Demand') AS name,\n  count(DISTINCT node_name) AS value\nFROM taonode_guardian.finops_metrics\nWHERE $__timeFilter(timestamp)\nGROUP BY is_spot",
@@ -203,7 +203,7 @@ data:
           "type": "row"
         },
         {
-          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+          "datasource": "Clickhouse",
           "description": "Estimated monthly cost per node over time. Useful for detecting cost regressions after config changes.",
           "fieldConfig": {
             "defaults": {
@@ -227,7 +227,7 @@ data:
           },
           "targets": [
             {
-              "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+              "datasource": "Clickhouse",
               "format": 1,
               "queryType": "sql",
               "rawSql": "SELECT\n  toStartOfInterval(timestamp, INTERVAL $__interval_s SECOND) AS time,\n  node_name,\n  avg(estimated_monthly_cost_usd) AS value\nFROM taonode_guardian.finops_metrics\nWHERE $__timeFilter(timestamp)\n  AND ($node_name = 'All' OR node_name = $node_name)\nGROUP BY time, node_name\nORDER BY time ASC",
@@ -238,7 +238,7 @@ data:
           "type": "timeseries"
         },
         {
-          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+          "datasource": "Clickhouse",
           "description": "ROI % trend per node. Falling ROI indicates degraded mining output relative to cost.",
           "fieldConfig": {
             "defaults": {
@@ -271,7 +271,7 @@ data:
           },
           "targets": [
             {
-              "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+              "datasource": "Clickhouse",
               "format": 1,
               "queryType": "sql",
               "rawSql": "SELECT\n  toStartOfInterval(timestamp, INTERVAL $__interval_s SECOND) AS time,\n  node_name,\n  avg(roi_percent) AS value\nFROM taonode_guardian.finops_metrics\nWHERE $__timeFilter(timestamp)\n  AND ($node_name = 'All' OR node_name = $node_name)\nGROUP BY time, node_name\nORDER BY time ASC",
@@ -289,7 +289,7 @@ data:
           "type": "row"
         },
         {
-          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+          "datasource": "Clickhouse",
           "description": "Latest estimated monthly cost per node, sorted descending. Identify highest-cost nodes.",
           "fieldConfig": {
             "defaults": {
@@ -324,7 +324,7 @@ data:
           },
           "targets": [
             {
-              "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+              "datasource": "Clickhouse",
               "format": 0,
               "queryType": "sql",
               "rawSql": "SELECT\n  node_name,\n  argMax(estimated_monthly_cost_usd, timestamp) AS cost\nFROM taonode_guardian.finops_metrics\nWHERE $__timeFilter(timestamp)\n  AND ($node_name = 'All' OR node_name = $node_name)\nGROUP BY node_name\nORDER BY cost DESC",
@@ -335,7 +335,7 @@ data:
           "type": "barchart"
         },
         {
-          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+          "datasource": "Clickhouse",
           "description": "Full FinOps breakdown table: cost, ROI, GPU hours, TAO/GPU·h, Spot status.",
           "fieldConfig": {
             "defaults": {"custom": {"align": "auto", "cellOptions": {"type": "auto"}, "inspect": false}},
@@ -393,7 +393,7 @@ data:
           },
           "targets": [
             {
-              "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+              "datasource": "Clickhouse",
               "format": 0,
               "queryType": "sql",
               "rawSql": "SELECT\n  node_name,\n  network,\n  role,\n  argMax(estimated_monthly_cost_usd, timestamp) AS estimated_monthly_cost_usd,\n  avg(roi_percent) AS roi_percent,\n  avg(tao_per_gpu_hour) AS tao_per_gpu_hour,\n  any(is_spot) AS is_spot,\n  argMax(gpu_count, timestamp) AS gpu_count\nFROM taonode_guardian.finops_metrics\nWHERE $__timeFilter(timestamp)\n  AND ($node_name = 'All' OR node_name = $node_name)\nGROUP BY node_name, network, role\nORDER BY estimated_monthly_cost_usd DESC",
@@ -411,7 +411,7 @@ data:
         "list": [
           {
             "current": {},
-            "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse-taonode"},
+            "datasource": "Clickhouse",
             "definition": "SELECT DISTINCT node_name FROM taonode_guardian.finops_metrics ORDER BY node_name",
             "hide": 0,
             "includeAll": true,

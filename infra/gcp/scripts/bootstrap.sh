@@ -281,7 +281,7 @@ log "    scp -i ~/.ssh/taonode-demo ubuntu@${PUBLIC_IP}:/etc/rancher/k3s/k3s.yam
 log "    export KUBECONFIG=~/.kube/taonode-gcp.yaml"
 log ""
 log "  ArgoCD initial admin password:"
-log "    kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d"
+log "    kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d; echo"
 log ""
 log "  Grafana admin password:"
 log "    cat /var/lib/taonode-guardian/grafana-admin-password"

@@ -25,7 +25,7 @@ EC2_IP="${EC2_IP:-$(
 ARGOCD_PASSWORD=""
 if kubectl get secret argocd-initial-admin-secret -n argocd &>/dev/null; then
   ARGOCD_PASSWORD="$(kubectl get secret argocd-initial-admin-secret -n argocd \
-    -o jsonpath='{.data.password}' | base64 -d)"
+    -o jsonpath="{.data.password}" | base64 -d; echo)"
 else
   ARGOCD_PASSWORD="<rotacionada — use 'argocd account update-password'>"
 fi
