@@ -66,9 +66,16 @@ func (r *TaoNode) ValidateDelete() (admission.Warnings, error) {
 func (r *TaoNode) validate(oldNode *TaoNode) (admission.Warnings, error) {
 	var allErrs field.ErrorList
 
-	// ── Validator role requirements ───────────────────────────────────────
-	if r.Spec.Role == RoleValidator {
+	// ── Validator/miner key-management requirements ──────────────────────
+	if r.Spec.Role == RoleValidator || r.Spec.Role == RoleMiner {
 		allErrs = append(allErrs, r.validateValidatorSpec(field.NewPath("spec"))...)
+	} else if r.Spec.Validator != nil {
+		// spec.validator is only meaningful for validator/miner roles.
+		// Reject it on subtensor nodes to prevent accidental key material exposure.
+		allErrs = append(allErrs, field.Forbidden(
+			field.NewPath("spec", "validator"),
+			"validator key material is only allowed for roles 'validator' or 'miner'",
+		))
 	}
 
 	// ── GPU type validation ───────────────────────────────────────────────

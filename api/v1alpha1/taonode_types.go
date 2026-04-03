@@ -709,6 +709,13 @@ type TaoNodeStatus struct {
 	// LastReconcileTime is the timestamp of the most recent reconcile loop execution.
 	// +optional
 	LastReconcileTime *metav1.Time `json:"lastReconcileTime,omitempty"`
+
+	// HotkeyHash is a truncated SHA-256 hash (first 8 bytes) of the hotkey secret content.
+	// Populated by the operator after validating the Secret; written as a pod-template
+	// annotation so that ESO-driven key rotation triggers an automatic rolling update.
+	// The full key material is never stored or logged — only this opaque prefix.
+	// +optional
+	HotkeyHash string `json:"hotkeyHash,omitempty"`
 }
 
 // ══════════════════════════════════════════════════════════════════
