@@ -139,6 +139,18 @@ func (r *TaoNodeReconciler) desiredStatefulSetForNode(
 	// FIX #3: resolve canonical --chain value (e.g. "testnet" → "test_finney").
 	chainSpec, needsExternalSpec := ResolveChainSpec(tn.Spec.Network)
 
+	// Gate ALL hotkey-related resources on both role AND spec.
+	// A subtensor node with an accidental spec.validator block must never receive
+	// hotkey-secret, keystore, key-injector, or --keystore-path (Zero Trust, doc 13).
+	hotkeyEnabled := requiresHotkeyMaterial(tn)
+
+	// Determine keystore path: only set for validators/miners with a configured hotkey.
+	// The path points to the tmpfs volume populated by the key-injector init container.
+	keystorePath := ""
+	if hotkeyEnabled {
+		keystorePath = "/keystore"
+	}
+
 	// FIX #2: build CLI args with unified RPC — no deprecated --ws-port.
 	cliArgs := (&SubstrateArgs{
 		ChainSpec:      chainSpec,
@@ -147,6 +159,7 @@ func (r *TaoNodeReconciler) desiredStatefulSetForNode(
 		P2PPort:        30333,
 		PrometheusPort: 9615,
 		NodeName:       tn.Name,
+		KeystorePath:   keystorePath,
 	}).Build()
 
 	nodeResources := tn.Spec.Resources
@@ -170,6 +183,12 @@ func (r *TaoNodeReconciler) desiredStatefulSetForNode(
 	// trigger rolling updates even when no other StatefulSet field changed.
 	annotations := r.annotationsForNode(tn)
 	annotations["tao.guardian.io/args-hash"] = hashArgs(cliArgs)
+	// RULE 9 (doc 13): hotkey-hash annotation triggers automatic rolling update when the
+	// ESO rotates the key in AWS Secrets Manager. The hash is computed in validateHotkeySecret
+	// and stored in Status before this point in the reconcile loop.
+	if hotkeyEnabled && tn.Status.HotkeyHash != "" {
+		annotations["tao.guardian.io/hotkey-hash"] = tn.Status.HotkeyHash
+	}
 
 	sts := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
@@ -228,10 +247,15 @@ func (r *TaoNodeReconciler) desiredStatefulSetForNode(
 					Type: corev1.SeccompProfileTypeRuntimeDefault,
 				},
 			},
-			ServiceAccountName:            tn.Name + "-sa",
+			ServiceAccountName: tn.Name + "-sa",
+			// RULE 6 (doc 13): disable automatic SA token mount — the validator
+			// process has no need to call the Kubernetes API. Eliminates the SA
+			// token as a lateral-movement vector if the container is compromised.
+			AutomountServiceAccountToken:  ptr.To(false),
 			TerminationGracePeriodSeconds: ptr.To(int64(120)),
-			// FIX #1: init container pre-chowns /data so main container needs zero caps.
-			InitContainers: []corev1.Container{buildInitContainer(image)},
+			// FIX #1 + Zero Trust Key Management: volume-permissions pre-chowns /data;
+			// key-injector copies hotkey from Secret to tmpfs (validators/miners only).
+			InitContainers: r.buildInitContainers(tn, image),
 			Containers:     r.buildContainers(tn, image, nodeResources, cliArgs, needsExternalSpec),
 			Volumes:        r.buildVolumes(tn, needsExternalSpec),
 			Tolerations:    tolerations,
@@ -267,6 +291,23 @@ func copyMutableStatefulSetFields(dst, src *appsv1.StatefulSet) {
 	dst.Spec.Template = src.Spec.Template
 }
 
+// buildInitContainers returns the ordered list of init containers for a TaoNode pod.
+//
+// Order matters — Kubernetes runs them sequentially:
+//  1. volume-permissions: runs as root, chowns /data to UID 1000 (FIX #1)
+//  2. key-injector: copies hotkey Secret → tmpfs; only for validators/miners (doc 13)
+func (r *TaoNodeReconciler) buildInitContainers(tn *taov1alpha1.TaoNode, image string) []corev1.Container {
+	// FIX #1: pre-chown /data so main container needs zero capabilities.
+	inits := []corev1.Container{buildInitContainer(image)}
+
+	// RULE 3 (doc 13): Secret is mounted ONLY in the init container. The main
+	// container receives the key via the shared tmpfs (keystore) volume.
+	if requiresHotkeyMaterial(tn) {
+		inits = append(inits, buildKeyInjectorInitContainer())
+	}
+	return inits
+}
+
 // buildContainers returns the container list for the TaoNode pod:
 //  1. Main node container — built by buildMainContainer (FIX #1 + #2 + #3)
 //  2. chain-probe sidecar — exposes :9616/health for probeChainHealth
@@ -278,8 +319,10 @@ func (r *TaoNodeReconciler) buildContainers(
 	cliArgs []string,
 	needsExternalSpec bool,
 ) []corev1.Container {
+	// RULE 3 (doc 13): main container mounts ONLY the tmpfs keystore, never the Secret.
+	hasHotkey := requiresHotkeyMaterial(tn)
 	containers := []corev1.Container{
-		buildMainContainer(image, resources, cliArgs, needsExternalSpec),
+		buildMainContainer(image, resources, cliArgs, needsExternalSpec, hasHotkey),
 		{
 			Name:  "chain-probe",
 			Image: "ghcr.io/claudiobotelhosb/taonode-guardian-probe:latest",
@@ -351,16 +394,34 @@ func (r *TaoNodeReconciler) buildVolumes(tn *taov1alpha1.TaoNode, needsExternalS
 		})
 	}
 
-	if tn.Spec.Validator != nil && tn.Spec.Validator.HotKeySecret != "" {
-		volumes = append(volumes, corev1.Volume{
-			Name: "validator-hotkey",
-			VolumeSource: corev1.VolumeSource{
-				Secret: &corev1.SecretVolumeSource{
-					SecretName:  tn.Spec.Validator.HotKeySecret,
-					DefaultMode: ptr.To(int32(0400)),
+	if requiresHotkeyMaterial(tn) {
+		volumes = append(volumes,
+			// RULE 3 (doc 13): Secret volume mounted ONLY in the key-injector init
+			// container. The main container never sees this volume.
+			corev1.Volume{
+				Name: "hotkey-secret",
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName:  tn.Spec.Validator.HotKeySecret,
+						DefaultMode: ptr.To(int32(0400)),
+						Items: []corev1.KeyToPath{
+							{Key: "hotkey", Path: "hotkey", Mode: ptr.To(int32(0400))},
+						},
+					},
 				},
 			},
-		})
+			// RULE 4 (doc 13): emptyDir with Medium=Memory forces tmpfs.
+			// The key exists ONLY in RAM — never touches the node's disk.
+			corev1.Volume{
+				Name: "keystore",
+				VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{
+						Medium:    corev1.StorageMediumMemory,
+						SizeLimit: ptr.To(resource.MustParse("1Mi")),
+					},
+				},
+			},
+		)
 	}
 
 	return volumes
@@ -441,6 +502,26 @@ func (r *TaoNodeReconciler) ensureServiceMonitor(ctx context.Context, tn *taov1a
 		return fmt.Errorf("create or update ServiceMonitor: %w", err)
 	}
 	return nil
+}
+
+// requiresHotkeyMaterial returns true only when both conditions are met:
+//  1. The TaoNode role is validator or miner (role-based gate, doc 13)
+//  2. spec.validator.hotKeySecret is explicitly configured
+//
+// This is the single authoritative predicate for all hotkey-related resources:
+// volumes, init containers, CLI args, and pod-template annotations. Using it
+// everywhere prevents a subtensor node with an accidental spec.validator block
+// from receiving key material.
+func requiresHotkeyMaterial(tn *taov1alpha1.TaoNode) bool {
+	if tn == nil {
+		return false
+	}
+	switch tn.Spec.Role {
+	case taov1alpha1.RoleValidator, taov1alpha1.RoleMiner:
+		return tn.Spec.Validator != nil && tn.Spec.Validator.HotKeySecret != ""
+	default:
+		return false
+	}
 }
 
 // convertLabels converts map[string]string to map[string]interface{} for

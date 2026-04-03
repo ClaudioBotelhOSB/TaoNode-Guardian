@@ -19,6 +19,7 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -60,6 +61,7 @@ const (
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services;serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshots,verbs=get;list;watch;create;delete
@@ -138,6 +140,11 @@ func (r *TaoNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 	if err := r.ensureHeadlessService(ctx, &tn); err != nil {
 		return ctrl.Result{}, fmt.Errorf("ensure headless Service: %w", err)
+	}
+	// Validate hotkey Secret existence and compute rotation hash BEFORE building
+	// the StatefulSet so the pod-template annotation is always up-to-date.
+	if err := r.validateHotkeySecret(ctx, &tn); err != nil {
+		return r.updateStatusAndRequeue(ctx, &tn, 30*time.Second)
 	}
 	if err := r.ensureNodeWorkload(ctx, &tn); err != nil {
 		return ctrl.Result{}, fmt.Errorf("ensure StatefulSet: %w", err)
@@ -614,6 +621,68 @@ func (r *TaoNodeReconciler) sendNotifications(
 			"confidence", report.Confidence,
 		)
 	}
+}
+
+// validateHotkeySecret checks that the Secret referenced by spec.validator.hotKeySecret
+// exists in the same namespace and contains the required "hotkey" data key.
+//
+// Zero Trust rules enforced (doc 13):
+//   - RULE 1:  only metadata is logged (size_bytes, secret name, hash prefix)
+//   - RULE 8:  Operator verifies existence only — never reads key material for use
+//   - RULE 9:  truncated hash (first 8 bytes) is stored in Status for rolling-update detection
+//
+// Returns nil for RoleSubtensor or when no HotKeySecret is configured.
+func (r *TaoNodeReconciler) validateHotkeySecret(
+	ctx context.Context, tn *taov1alpha1.TaoNode,
+) error {
+	if tn.Spec.Role != taov1alpha1.RoleValidator && tn.Spec.Role != taov1alpha1.RoleMiner {
+		tn.Status.HotkeyHash = "" // clear residual state if role no longer requires a key
+		return nil
+	}
+	if tn.Spec.Validator == nil || tn.Spec.Validator.HotKeySecret == "" {
+		tn.Status.HotkeyHash = ""
+		return fmt.Errorf("hotkey secret reference is required for role %s", tn.Spec.Role)
+	}
+
+	secret := &corev1.Secret{}
+	err := r.Get(ctx, types.NamespacedName{
+		Name:      tn.Spec.Validator.HotKeySecret,
+		Namespace: tn.Namespace,
+	}, secret)
+	if err != nil {
+		tn.Status.HotkeyHash = ""
+		if apierrors.IsNotFound(err) {
+			r.setCondition(tn, "HotkeyAvailable", metav1.ConditionFalse,
+				"SecretNotFound",
+				fmt.Sprintf("Secret %s not found in namespace %s. Create it via ExternalSecret or kubectl.",
+					tn.Spec.Validator.HotKeySecret, tn.Namespace))
+			return err
+		}
+		return fmt.Errorf("check hotkey secret: %w", err)
+	}
+
+	keyData, exists := secret.Data["hotkey"]
+	if !exists {
+		tn.Status.HotkeyHash = ""
+		return fmt.Errorf("secret %s exists but missing 'hotkey' data key",
+			tn.Spec.Validator.HotKeySecret)
+	}
+
+	// RULE 9: compute truncated hash for rotation detection.
+	// Only the 8-byte prefix is stored — never the full hash or the key material.
+	hashBytes := sha256.Sum256(keyData)
+	hashPrefix := fmt.Sprintf("sha256:%x", hashBytes[:8])
+
+	// Store in status; used as pod-template annotation in desiredStatefulSetForNode.
+	tn.Status.HotkeyHash = hashPrefix
+
+	// RULE 1: log only metadata, never the key value.
+	r.setCondition(tn, "HotkeyAvailable", metav1.ConditionTrue,
+		"SecretValid",
+		fmt.Sprintf("Hotkey secret %s validated (size_bytes: %d, hash: %s)",
+			tn.Spec.Validator.HotKeySecret, len(keyData), hashPrefix))
+
+	return nil
 }
 
 // SetupWithManager registers the TaoNodeReconciler with the controller-runtime

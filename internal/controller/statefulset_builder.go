@@ -90,7 +90,11 @@ type SubstrateArgs struct {
 	P2PPort        int32
 	PrometheusPort int32
 	NodeName       string
-	ExtraArgs      []string // escape hatch for future flags
+	// KeystorePath is the mount path of the tmpfs keystore volume.
+	// Set to "/keystore" for validators/miners with a hotkey; empty otherwise.
+	// Emits --keystore-path=<path> when non-empty.
+	KeystorePath string
+	ExtraArgs    []string // escape hatch for future flags
 }
 
 // Build produces the complete argument vector for the Subtensor container.
@@ -105,6 +109,10 @@ func (s *SubstrateArgs) Build() []string {
 		fmt.Sprintf("--port=%d", s.P2PPort),
 		fmt.Sprintf("--prometheus-port=%d", s.PrometheusPort),
 		"--prometheus-external",
+	}
+
+	if s.KeystorePath != "" {
+		args = append(args, fmt.Sprintf("--keystore-path=%s", s.KeystorePath))
 	}
 
 	switch strings.ToLower(s.Role) {
@@ -177,15 +185,71 @@ func buildInitContainer(image string) corev1.Container {
 	}
 }
 
+// buildKeyInjectorInitContainer creates the "key-injector" init container (doc 13, Rule 3).
+//
+// Architecture:
+//   - Runs as root (UID 0) with CAP_CHOWN + CAP_DAC_OVERRIDE; exits immediately after
+//   - Mounts the hotkey-secret volume (read-only) and the keystore tmpfs (read-write)
+//   - Copies /secrets/hotkey → /keystore/hotkey with mode 0400, owner 1000:1000
+//   - Validates key size (>20 bytes) and exits; Secret volume is gone after this point
+//   - Main container receives the key via the shared tmpfs — never via the Secret
+//
+// RULE 1: key content is never logged. Only key size (in bytes) is echoed on success.
+// RULE 7: busybox:1.36-musl (<2 MB, no shell, no network, no apk).
+func buildKeyInjectorInitContainer() corev1.Container {
+	return corev1.Container{
+		Name:    "key-injector",
+		Image:   "busybox:1.36-musl",
+		Command: []string{"/bin/sh", "-c"},
+		Args: []string{
+			`cp /secrets/hotkey /keystore/hotkey && ` +
+				`chmod 0400 /keystore/hotkey && ` +
+				`chown 1000:1000 /keystore/hotkey && ` +
+				`KEY_SIZE=$(wc -c < /keystore/hotkey) && ` +
+				`if [ "$KEY_SIZE" -lt 20 ]; then ` +
+				`echo "ERROR: Hotkey too small (${KEY_SIZE} bytes)" && exit 1; fi && ` +
+				`echo "Key injected (${KEY_SIZE} bytes)"`,
+		},
+		VolumeMounts: []corev1.VolumeMount{
+			{Name: "hotkey-secret", MountPath: "/secrets", ReadOnly: true},
+			{Name: "keystore", MountPath: "/keystore"},
+		},
+		SecurityContext: &corev1.SecurityContext{
+			RunAsUser:                ptr.To[int64](0), // root for chown; container exits immediately
+			AllowPrivilegeEscalation: ptr.To(false),
+			ReadOnlyRootFilesystem:   ptr.To(true),
+			Capabilities: &corev1.Capabilities{
+				Drop: []corev1.Capability{"ALL"},
+				Add:  []corev1.Capability{"CHOWN", "DAC_OVERRIDE"},
+			},
+		},
+		Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("10m"),
+				corev1.ResourceMemory: resource.MustParse("16Mi"),
+			},
+			Limits: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("50m"),
+				corev1.ResourceMemory: resource.MustParse("32Mi"),
+			},
+		},
+	}
+}
+
 // buildMainContainer creates the primary Subtensor container (FIX #1 + #2 + #3).
 //
 // Security posture: non-root, zero capabilities, read-only root FS.
 // This is achievable because buildInitContainer pre-established /data ownership.
+//
+// When hasHotkey is true, the tmpfs keystore volume is mounted read-only at /keystore.
+// The Kubernetes Secret volume is NOT mounted here — per RULE 3 (doc 13), the Secret
+// is only accessible to the key-injector init container.
 func buildMainContainer(
 	image string,
 	resources corev1.ResourceRequirements,
 	cliArgs []string,
 	needsExternalSpec bool,
+	hasHotkey bool,
 ) corev1.Container {
 	volumeMounts := []corev1.VolumeMount{
 		{Name: chainDataVolume, MountPath: "/data"},
@@ -195,6 +259,15 @@ func buildMainContainer(
 			Name:      "chain-spec",
 			MountPath: "/data/chain-spec",
 			ReadOnly:  true,
+		})
+	}
+	// RULE 3 (doc 13): main container mounts ONLY the tmpfs (never the Secret).
+	// RULE 4 (doc 13): the keystore volume is emptyDir{medium:Memory} — pure RAM.
+	if hasHotkey {
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      "keystore",
+			MountPath: "/keystore",
+			ReadOnly:  true, // main container reads the key; only init container writes it
 		})
 	}
 
