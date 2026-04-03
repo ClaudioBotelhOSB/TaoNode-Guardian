@@ -497,6 +497,15 @@ cosign verify ghcr.io/claudiobotelhosb/taonode-guardian:v1.0.0 \
   --certificate-identity-regexp="https://github.com/ClaudioBotelhOSB/taonode-guardian/.github/workflows/release.yaml" \
   --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
 ```
+---
+## 🏗️ Known Limitations & Architecture Trade-offs
+
+This project as a Proof of Concept (PoC) moving towards a production-ready state, the current architecture has accepted the following trade-offs, which are mapped for future milestones:
+
+* **Data Lake SPOF (Single Point of Failure):** Currently, the ClickHouse analytics backend runs as a single-node instance. *Milestone:* Implementation of a `ReplicatedMergeTree` topology with ZooKeeper/ClickHouse Keeper, alongside S3 Tiered Storage for FinOps optimization.
+* **AI Compute Isolation:** The AIOps predictive engine (Llama 3 integration) is designed to run within the cluster. *Milestone:* Implement strict Kubernetes `Taints` and `Tolerations` to ensure inference workloads run on dedicated GPU nodes, preventing resource starvation on the Operator's control loop.
+* **Stateful Eviction & Drain Strategy:** The auto-recovery mechanism handles pod restarts, but node draining requires careful handling of Local Persistent Volumes used by Bittensor miners. *Milestone:* Deep integration with Container Storage Interface (CSI) and StatefulSet PVC retention policies during node cordoning.
+* **Zero-Trust Network Policies:** Currently, the cluster allows default East-West traffic. *Milestone:* Implement strict Kubernetes NetworkPolicies (Default Deny) ensuring only the Operator can write to ClickHouse, and only Grafana can query it.
 
 ---
 
