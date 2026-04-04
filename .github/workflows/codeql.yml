@@ -1,0 +1,57 @@
+name: "CodeQL Advanced"
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    # Execução semanal de madrugada aos domingos (para pegar possíveis vulnerabilidades silenciosas e reports 0-day)
+    - cron: '30 2 * * 0'
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      # Necessário para fazer upload do SARIF e exibir na seção Security do GitHub
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Analisando especificamente o Go, que é a base do Guardian Operator.
+        # Caso possua frontend, pode adicionar 'javascript-typescript' aqui no futuro.
+        language: [ 'go' ]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Configuração da versão do Go correspondente antes do build do CodeQL (mesma versão do security.yml)
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.0'
+          cache: true
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # Utilização nativa avançada para abranger as queries que varrem 
+          # qualidade de código extrema, segurança e code smells profundamente.
+          queries: security-extended,security-and-quality
+          
+      # Compilação Automática do Código: o autobuild extrai a sintaxe e o AST dinamicamente na action
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      # Execução da Análise de AST/Semântica para varreduras de injeção e falhas arquiteturais
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{matrix.language}}"
