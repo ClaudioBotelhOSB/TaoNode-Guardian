@@ -67,17 +67,11 @@ func (r *TaoNode) validate(oldNode *TaoNode) (admission.Warnings, error) {
 	var allErrs field.ErrorList
 
 	// ── Key-management requirements ──────────────────────────────────────
-	// Validator: hotkey is REQUIRED — cannot participate in consensus without one.
-	// Miner:     hotkey is OPTIONAL — can run as unauthenticated full node;
-	//            when a validator block IS present, validate its content.
+	// Validator/miner: hotkey is REQUIRED by the Zero Trust key-management contract.
 	// Other:     spec.validator is FORBIDDEN — prevents accidental key exposure.
 	switch r.Spec.Role {
-	case RoleValidator:
+	case RoleValidator, RoleMiner:
 		allErrs = append(allErrs, r.validateValidatorSpec(field.NewPath("spec"))...)
-	case RoleMiner:
-		if r.Spec.Validator != nil {
-			allErrs = append(allErrs, r.validateValidatorSpec(field.NewPath("spec"))...)
-		}
 	default:
 		if r.Spec.Validator != nil {
 			allErrs = append(allErrs, field.Forbidden(
@@ -122,7 +116,7 @@ func (r *TaoNode) validateValidatorSpec(fldPath *field.Path) field.ErrorList {
 	if r.Spec.Validator == nil {
 		errs = append(errs, field.Required(
 			fldPath.Child("validator"),
-			"validator spec is required when role is 'validator'",
+			"validator spec is required when role is 'validator' or 'miner'",
 		))
 		return errs
 	}
@@ -132,7 +126,7 @@ func (r *TaoNode) validateValidatorSpec(fldPath *field.Path) field.ErrorList {
 	if v.HotKeySecret == "" {
 		errs = append(errs, field.Required(
 			fldPath.Child("validator", "hotKeySecret"),
-			"hotKeySecret must be specified for validator nodes",
+			"hotKeySecret must be specified for validator and miner nodes",
 		))
 	}
 
