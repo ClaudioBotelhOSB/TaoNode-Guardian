@@ -1,0 +1,97 @@
+# Role: Workload Manager
+# Scope: ONE per managed namespace (e.g. bittensor, bittensor-testnet).
+#
+# This Role is NOT created by the Operator (Option A — doc 14 Section 6).
+# The SRE applies it BEFORE creating TaoNodes in a new namespace.
+# If absent, validateNamespacePermissions() blocks provisioning and sets
+# the NamespaceReady=False condition with a clear action message.
+#
+# To apply for a namespace:
+#   kubectl apply -n <target-namespace> -f config/rbac/role-workload-manager.yaml
+#
+# The Operator checks for this Role by name ("taonode-guardian-workload-manager")
+# at the start of every reconcile cycle. The name must not change.
+#
+# doc 14, Section 4.5
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: taonode-guardian-workload-manager
+  labels:
+    app.kubernetes.io/name: taonode-guardian
+    app.kubernetes.io/component: rbac
+rules:
+  # StatefulSets — full CRUD (Operator owns these resources via OwnerReference)
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Services — full CRUD (headless Service for StatefulSet DNS discovery)
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # ServiceAccounts — full CRUD (per-TaoNode SA for pod identity scoping)
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Pods — read + delete only (probe IP discovery + recovery restart)
+  # The Operator does NOT create Pods directly — StatefulSet manages pod lifecycle.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "delete"]
+
+  # PersistentVolumeClaims — read + create/expand (chain storage, auto-expansion)
+  # delete is intentionally absent: chain data is too valuable to delete accidentally.
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+
+  # Events — create/patch (emit K8s Events in managed namespaces)
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+
+  # Secrets — read-only (validate hotkey existence + compute rotation hash)
+  # The Operator does NOT create/update/delete Secrets — ESO manages the lifecycle.
+  # Protection layers: code never uses key content; audit log tracks every GET.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+
+  # Leases — full CRUD (validator singleton enforcement, anti-slashing)
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # VolumeSnapshots — lifecycle management (DR + recovery)
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+
+  # ServiceMonitors — full CRUD (Prometheus integration per TaoNode)
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["servicemonitors"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # PrometheusRules — full CRUD (alert rules defined in CRD spec)
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["prometheusrules"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: taonode-guardian-workload-manager
+  labels:
+    app.kubernetes.io/name: taonode-guardian
+    app.kubernetes.io/component: rbac
+subjects:
+  - kind: ServiceAccount
+    name: taonode-guardian-controller-manager
+    namespace: taonode-guardian-system
+roleRef:
+  kind: Role
+  name: taonode-guardian-workload-manager
+  apiGroup: rbac.authorization.k8s.io

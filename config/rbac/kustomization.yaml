@@ -2,8 +2,13 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
+# ── Operator identity ────────────────────────────────────────────────────────
 - service_account.yaml
-- role.yaml
-- role_binding.yaml
-- leader_election_role.yaml
-- leader_election_role_binding.yaml
+
+# ── Production segregated roles (doc 14, Section 4) ──────────────────────────
+# role-workload-manager.yaml is a template and MUST be applied separately
+# per managed namespace by the SRE — NOT included here.
+- clusterrole-crd-manager.yaml
+- clusterrole-resource-observer.yaml
+- role-leader-election.yaml
+- role-webhook-certs.yaml

@@ -7,15 +7,31 @@ metadata:
     app.kubernetes.io/component: rbac
 rules:
   # ── TaoNode CRD ─────────────────────────────────────────────────────────────
+  # Operator OBSERVES TaoNodes — create/delete are user-initiated, not Operator ops.
   - apiGroups: ["tao.guardian.io"]
     resources: ["taonodes"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["tao.guardian.io"]
     resources: ["taonodes/status"]
     verbs: ["get", "update", "patch"]
   - apiGroups: ["tao.guardian.io"]
     resources: ["taonodes/finalizers"]
     verbs: ["update"]
+
+  # ── Cluster-scoped resources (read-only) ─────────────────────────────────────
+  # Nodes: GPU scheduling label queries (node pool affinity, GPU type)
+  # Namespaces: verify target namespace exists before provisioning
+  - apiGroups: [""]
+    resources: ["nodes", "namespaces"]
+    verbs: ["get", "list", "watch"]
+
+  # ── RBAC introspection — surgical, resourceNames-scoped ─────────────────────
+  # Required so validateNamespacePermissions() can confirm the SRE has applied
+  # the per-namespace Role before the Operator provisions any workload.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles"]
+    resourceNames: ["taonode-guardian-workload-manager"]
+    verbs: ["get"]
 
   # ── StatefulSets — one per TaoNode ──────────────────────────────────────────
   - apiGroups: ["apps"]
@@ -38,11 +54,18 @@ rules:
     verbs: ["get", "list", "watch", "delete"]
 
   # ── PersistentVolumeClaims — chain data storage + auto-expand ───────────────
+  # delete is intentionally absent: chain data is too valuable to delete accidentally.
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
     verbs: ["get", "list", "watch", "create", "update", "patch"]
 
-  # ── Leases — validator singleton coordination ───────────────────────────────
+  # ── Secrets — read-only (hotkey validation + rotation hash) ─────────────────
+  # Operator never creates/updates/deletes Secrets — ESO manages the lifecycle.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+
+  # ── Leases — validator singleton coordination + workload anti-slashing ───────
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -52,10 +75,15 @@ rules:
     resources: ["volumesnapshots"]
     verbs: ["get", "list", "watch", "create", "delete"]
 
-  # ── ServiceMonitors — optional prometheus-operator integration ──────────────
+  # ── ServiceMonitors — Prometheus integration per TaoNode ────────────────────
   - apiGroups: ["monitoring.coreos.com"]
     resources: ["servicemonitors"]
-    verbs: ["get", "list", "watch", "create", "update", "patch"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # ── PrometheusRules — alert rules defined in CRD spec ───────────────────────
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["prometheusrules"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
   # ── Events — emitted by the event recorder (kubectl describe taonode …) ─────
   - apiGroups: [""]

@@ -1,0 +1,48 @@
+# ClusterRole: Resource Observer
+# Scope: cluster-wide, READ-ONLY.
+#
+# Nodes are cluster-scoped resources — required for GPU scheduling label queries
+# (node pool affinity, GPU type) and cannot be accessed via namespaced Role.
+# Namespaces are read to verify the target namespace exists before provisioning.
+#
+# Zero write permissions on nodes or namespaces: cordon/drain/delete are SRE ops.
+#
+# doc 14, Section 4.2
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: taonode-guardian-resource-observer
+  labels:
+    app.kubernetes.io/name: taonode-guardian
+    app.kubernetes.io/component: rbac
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+  # Roles — scoped to the single workload-manager Role name (resourceNames).
+  # Required so validateNamespacePermissions() can confirm the SRE has applied
+  # the per-namespace Role before the Operator provisions any workload.
+  # No list/watch: the Operator only needs to confirm this specific Role exists.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles"]
+    resourceNames: ["taonode-guardian-workload-manager"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: taonode-guardian-resource-observer
+  labels:
+    app.kubernetes.io/name: taonode-guardian
+    app.kubernetes.io/component: rbac
+subjects:
+  - kind: ServiceAccount
+    name: taonode-guardian-controller-manager
+    namespace: taonode-guardian-system
+roleRef:
+  kind: ClusterRole
+  name: taonode-guardian-resource-observer
+  apiGroup: rbac.authorization.k8s.io

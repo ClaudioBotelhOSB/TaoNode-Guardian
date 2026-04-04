@@ -1,0 +1,44 @@
+# Role: Leader Election
+# Scope: namespace taonode-guardian-system only.
+#
+# controller-runtime v0.19+ uses Lease-based leader election exclusively.
+# ConfigMap-based election (used by older controller-runtime) is NOT included:
+# no ConfigMap permission means this vector is closed if the SA is compromised.
+#
+# The delete verb is intentionally absent from leases: controller-runtime manages
+# lease expiration automatically — explicit delete is never needed and would
+# allow lock disruption if the SA were compromised.
+#
+# doc 14, Section 4.3
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: taonode-guardian-leader-election
+  namespace: taonode-guardian-system
+  labels:
+    app.kubernetes.io/name: taonode-guardian
+    app.kubernetes.io/component: rbac
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: taonode-guardian-leader-election
+  namespace: taonode-guardian-system
+  labels:
+    app.kubernetes.io/name: taonode-guardian
+    app.kubernetes.io/component: rbac
+subjects:
+  - kind: ServiceAccount
+    name: taonode-guardian-controller-manager
+    namespace: taonode-guardian-system
+roleRef:
+  kind: Role
+  name: taonode-guardian-leader-election
+  apiGroup: rbac.authorization.k8s.io

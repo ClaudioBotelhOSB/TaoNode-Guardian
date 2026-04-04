@@ -7,16 +7,15 @@ metadata:
     app.kubernetes.io/name: taonode-guardian
     app.kubernetes.io/component: rbac
 rules:
-  # controller-runtime v0.15+ uses Lease-based leader election exclusively.
-  # ConfigMap rules are retained for compatibility with older client-go builds.
-  - apiGroups: [""]
-    resources: ["configmaps"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-
-  # Lease object named "tao.guardian.io" — see LeaderElectionID in cmd/main.go.
+  # controller-runtime v0.19+ uses Lease-based leader election exclusively.
+  # ConfigMap-based election is NOT included: no ConfigMap permission means
+  # this vector is closed if the SA is compromised.
+  #
+  # delete is intentionally absent: controller-runtime manages lease expiration
+  # automatically — explicit delete is never needed.
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
 
   # Events emitted by the leader-election library itself.
   - apiGroups: [""]

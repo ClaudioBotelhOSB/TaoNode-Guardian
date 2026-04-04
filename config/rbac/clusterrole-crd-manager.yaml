@@ -1,0 +1,41 @@
+# ClusterRole: CRD Manager
+# Scope: cluster-wide (TaoNode is a namespaced CRD but the controller watches
+#        all namespaces, so the API registration is global).
+#
+# The Operator OBSERVES TaoNodes — it does NOT create or delete them.
+# create/delete are user-initiated operations, not Operator operations.
+#
+# doc 14, Section 4.1
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: taonode-guardian-crd-manager
+  labels:
+    app.kubernetes.io/name: taonode-guardian
+    app.kubernetes.io/component: rbac
+rules:
+  - apiGroups: ["tao.guardian.io"]
+    resources: ["taonodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["tao.guardian.io"]
+    resources: ["taonodes/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["tao.guardian.io"]
+    resources: ["taonodes/finalizers"]
+    verbs: ["update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: taonode-guardian-crd-manager
+  labels:
+    app.kubernetes.io/name: taonode-guardian
+    app.kubernetes.io/component: rbac
+subjects:
+  - kind: ServiceAccount
+    name: taonode-guardian-controller-manager
+    namespace: taonode-guardian-system
+roleRef:
+  kind: ClusterRole
+  name: taonode-guardian-crd-manager
+  apiGroup: rbac.authorization.k8s.io

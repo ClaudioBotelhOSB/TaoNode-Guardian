@@ -1,0 +1,42 @@
+# Role: Webhook Certs
+# Scope: namespace taonode-guardian-system only.
+#
+# The Operator reads the TLS certificate to serve the admission webhook HTTPS
+# endpoint. Access is restricted by resourceNames to the EXACT Secret name —
+# this is the most surgical RBAC permission possible: even if the SA is
+# compromised, the attacker cannot enumerate or read any other Secret in the
+# namespace (no list/watch, no get without resourceNames).
+#
+# cert-manager (or the SRE) manages the cert lifecycle; the Operator only reads.
+#
+# doc 14, Section 4.4
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: taonode-guardian-webhook-certs
+  namespace: taonode-guardian-system
+  labels:
+    app.kubernetes.io/name: taonode-guardian
+    app.kubernetes.io/component: rbac
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+    resourceNames: ["webhook-server-cert"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: taonode-guardian-webhook-certs
+  namespace: taonode-guardian-system
+  labels:
+    app.kubernetes.io/name: taonode-guardian
+    app.kubernetes.io/component: rbac
+subjects:
+  - kind: ServiceAccount
+    name: taonode-guardian-controller-manager
+    namespace: taonode-guardian-system
+roleRef:
+  kind: Role
+  name: taonode-guardian-webhook-certs
+  apiGroup: rbac.authorization.k8s.io
