@@ -106,7 +106,6 @@ jobs:
           output_format: sarif
           output_file_path: checkov-results.sarif
           soft_fail: false
-          soft_fail: false
 
       - name: Upload SARIF report to GitHub Security
         uses: github/codeql-action/upload-sarif@v4
@@ -141,7 +140,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Trivy — Scan Docker image
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
         with:
           image-ref: ${{ env.IMAGE }}
           format: sarif
@@ -159,7 +158,7 @@ jobs:
           category: trivy-image
 
       - name: Trivy — Scan Go dependencies (filesystem)
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
         if: success() || failure()
         with:
           scan-type: fs
