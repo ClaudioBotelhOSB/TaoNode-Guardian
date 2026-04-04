@@ -23,43 +23,41 @@ on:
     branches: [main]
 
 permissions:
-  contents: read         # Leitura do repositório
-  security-events: write # Publicar alertas no GitHub Security tab (SARIF)
+  contents: read         
+  security-events: write 
+  actions: read          
 
 env:
   GO_VERSION: '1.23.0'
   IMAGE: ghcr.io/claudiobotelhosb/taonode-guardian:ci-scan-${{ github.sha }}
 
 # ── 1. GITLEAKS ──────────────────────────────────────────────────────────────
-# Defense in Depth: garante que ninguém fez git commit --no-verify no hook local.
 jobs:
   gitleaks:
-    name: "🔑 Gitleaks — Secret Scanner"
+    name: "🔑 Gitleaks"
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
-      - name: Checkout (com histórico completo para diff)
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # Necessário para o Gitleaks escanear todo o histórico do PR
+          fetch-depth: 0 
 
       - name: Run Gitleaks
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}  # Descomente se usar a versão Pro
+          # GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }} 
 
 # ── 2. GOSEC ────────────────────────────────────────────────────────────────
-# Análise estática de segurança (SAST) do código Go.
-# Detecta: SQL Injection, criptografia fraca, permissões de arquivo inseguras,
-# variáveis de ambiente lidas sem sanitização, etc.
   gosec:
-    name: "🛡️ Gosec — Go SAST"
+    name: "🛡️ Gosec"
     runs-on: ubuntu-latest
     permissions:
       contents: read
       security-events: write
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -73,8 +71,6 @@ jobs:
       - name: Run Gosec Security Scanner
         uses: securego/gosec@master
         with:
-          # Saída em SARIF para integrar com o GitHub Security tab
-          # e em texto para facilitar leitura no log do CI
           args: >-
             -fmt sarif
             -out gosec-results.sarif
@@ -84,22 +80,20 @@ jobs:
             ./...
 
       - name: Upload SARIF report to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()   # Submete mesmo se o Gosec falhou (para ver os alertas)
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()   
         with:
           sarif_file: gosec-results.sarif
           category: gosec
 
 # ── 3. CHECKOV ──────────────────────────────────────────────────────────────
-# Varredura de IaC e Kubernetes manifests.
-# Detecta: containers rodando como root, sem limites de CPU/RAM,
-# imagens sem tag de versão, RBAC excessivo, privilégios elevados, etc.
   checkov:
-    name: "☁️ Checkov — IaC & K8s Scanner"
+    name: "☁️ Checkov"
     runs-on: ubuntu-latest
     permissions:
       contents: read
       security-events: write
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -107,35 +101,28 @@ jobs:
       - name: Run Checkov
         uses: bridgecrewio/checkov-action@v12
         with:
-          # Escaneia todos os diretórios relevantes do projeto
           directory: .
-          # Frameworks a verificar
           framework: kubernetes,dockerfile,github_actions,secrets
-          # Saída em SARIF para GitHub Security tab
           output_format: sarif
           output_file_path: checkov-results.sarif
-          # Não quebrar o build em soft-fail — apenas reportar
-          # Remova a linha abaixo para tornar o job blocking em falhas altas
           soft_fail: false
-          # Ignora regras conhecidas como aceitas no projeto (adicione conforme necessário)
-          # skip_check: CKV_K8S_14,CKV_K8S_28
+          soft_fail: false
 
       - name: Upload SARIF report to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: checkov-results.sarif
           category: checkov
 
 # ── 4. TRIVY (Dockerfile + Filesystem) ──────────────────────────────────────
-# Varredura de CVEs em dependências Go, imagem Docker e sistema de arquivos.
-# Trivy é pesado (baixa banco de CVEs ~200MB) — ideal no CI, nunca local.
   trivy:
-    name: "🐳 Trivy — CVE & Image Scanner"
+    name: "🐳 Trivy"
     runs-on: ubuntu-latest
     permissions:
       contents: read
       security-events: write
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -143,20 +130,16 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # ─── 4a. Build da imagem local apenas para escaneamento ─────────────────
-      # Não faz push. Serve apenas como alvo do Trivy.
       - name: Build Docker image for scanning
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
           push: false
-          load: true             # Carrega no daemon local do Docker
+          load: true             
           tags: ${{ env.IMAGE }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      # ─── 4b. Escanear a IMAGEM (Alpine base + binário Go compilado) ─────────
       - name: Trivy — Scan Docker image
         uses: aquasecurity/trivy-action@master
         with:
@@ -164,21 +147,20 @@ jobs:
           format: sarif
           output: trivy-image-results.sarif
           severity: CRITICAL,HIGH
-          # Quebra o build em vulnerabilidades CRÍTICAS
           exit-code: '1'
-          ignore-unfixed: true        # Ignora CVEs sem patch disponível
+          ignore-unfixed: true        
           vuln-type: os,library
 
       - name: Upload image scan SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: trivy-image-results.sarif
           category: trivy-image
 
-      # ─── 4c. Escanear o FILESYSTEM (módulos Go: go.mod / go.sum) ────────────
       - name: Trivy — Scan Go dependencies (filesystem)
         uses: aquasecurity/trivy-action@master
+        if: success() || failure()
         with:
           scan-type: fs
           scan-ref: .
@@ -190,7 +172,7 @@ jobs:
           vuln-type: library
 
       - name: Upload filesystem scan SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: trivy-fs-results.sarif
