@@ -277,6 +277,28 @@ var _ = Describe("TaoNodeReconciler", func() {
 		var tn *taov1alpha1.TaoNode
 
 		BeforeEach(func() {
+			// validateHotkeySecret calls r.Get() on the Secret before building the
+			// StatefulSet. The Secret must exist in the test namespace or the
+			// reconciler aborts (NotFound) before creating any workload resources.
+			hotKeySecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "validator-hotkey-placeholder",
+					Namespace: testNamespace,
+				},
+				Data: map[string][]byte{
+					// 32 zero-bytes satisfy the ">20 bytes" size check in the
+					// key-injector init container and the len() check in the operator.
+					"hotkey": make([]byte, 32),
+				},
+			}
+			err := k8sClient.Create(ctx, hotKeySecret)
+			if err != nil && !apierrors.IsAlreadyExists(err) {
+				Expect(err).NotTo(HaveOccurred())
+			}
+			DeferCleanup(func() {
+				_ = k8sClient.Delete(ctx, hotKeySecret)
+			})
+
 			tn = newValidatorSpec("validator-sn1")
 			Expect(k8sClient.Create(ctx, tn)).To(Succeed())
 			DeferCleanup(waitAndDeleteTaoNode, tn)

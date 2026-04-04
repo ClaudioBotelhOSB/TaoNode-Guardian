@@ -635,10 +635,21 @@ func (r *TaoNodeReconciler) sendNotifications(
 func (r *TaoNodeReconciler) validateHotkeySecret(
 	ctx context.Context, tn *taov1alpha1.TaoNode,
 ) error {
+	// RoleSubtensor (and any future roles): no key material ever needed.
 	if tn.Spec.Role != taov1alpha1.RoleValidator && tn.Spec.Role != taov1alpha1.RoleMiner {
-		tn.Status.HotkeyHash = "" // clear residual state if role no longer requires a key
+		tn.Status.HotkeyHash = ""
 		return nil
 	}
+
+	// RoleMiner: hotkey is OPTIONAL — a miner can run as an unauthenticated
+	// full node. Skip validation entirely when no validator block is configured.
+	if tn.Spec.Role == taov1alpha1.RoleMiner &&
+		(tn.Spec.Validator == nil || tn.Spec.Validator.HotKeySecret == "") {
+		tn.Status.HotkeyHash = ""
+		return nil
+	}
+
+	// RoleValidator: hotkey is REQUIRED — cannot participate in consensus without one.
 	if tn.Spec.Validator == nil || tn.Spec.Validator.HotKeySecret == "" {
 		tn.Status.HotkeyHash = ""
 		return fmt.Errorf("hotkey secret reference is required for role %s", tn.Spec.Role)

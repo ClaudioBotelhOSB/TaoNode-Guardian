@@ -66,16 +66,25 @@ func (r *TaoNode) ValidateDelete() (admission.Warnings, error) {
 func (r *TaoNode) validate(oldNode *TaoNode) (admission.Warnings, error) {
 	var allErrs field.ErrorList
 
-	// ── Validator/miner key-management requirements ──────────────────────
-	if r.Spec.Role == RoleValidator || r.Spec.Role == RoleMiner {
+	// ── Key-management requirements ──────────────────────────────────────
+	// Validator: hotkey is REQUIRED — cannot participate in consensus without one.
+	// Miner:     hotkey is OPTIONAL — can run as unauthenticated full node;
+	//            when a validator block IS present, validate its content.
+	// Other:     spec.validator is FORBIDDEN — prevents accidental key exposure.
+	switch r.Spec.Role {
+	case RoleValidator:
 		allErrs = append(allErrs, r.validateValidatorSpec(field.NewPath("spec"))...)
-	} else if r.Spec.Validator != nil {
-		// spec.validator is only meaningful for validator/miner roles.
-		// Reject it on subtensor nodes to prevent accidental key material exposure.
-		allErrs = append(allErrs, field.Forbidden(
-			field.NewPath("spec", "validator"),
-			"validator key material is only allowed for roles 'validator' or 'miner'",
-		))
+	case RoleMiner:
+		if r.Spec.Validator != nil {
+			allErrs = append(allErrs, r.validateValidatorSpec(field.NewPath("spec"))...)
+		}
+	default:
+		if r.Spec.Validator != nil {
+			allErrs = append(allErrs, field.Forbidden(
+				field.NewPath("spec", "validator"),
+				"validator key material is only allowed for roles 'validator' or 'miner'",
+			))
+		}
 	}
 
 	// ── GPU type validation ───────────────────────────────────────────────
