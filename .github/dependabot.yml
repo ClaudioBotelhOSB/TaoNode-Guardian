@@ -1,0 +1,36 @@
+version: 2
+updates:
+  # 1. Gestão de dependências do Go (Módulos e versão do Go)
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "go"
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
+
+  # 2. Gestão de dependências das Github Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    groups:
+      actions-dependencies:
+        patterns:
+          - "*"
+
+  # 3. Gestão de dependências da Imagem Docker (Base Alpine/Ubuntu/Outras)
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "docker"

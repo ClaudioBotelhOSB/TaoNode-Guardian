@@ -114,9 +114,25 @@ jobs:
           sarif_file: checkov-results.sarif
           category: checkov
 
-# ── 4. TRIVY (Dockerfile + Filesystem) ──────────────────────────────────────
+# ── 4. SONARQUBE ────────────────────────────────────────────────────────────
+  sonarqube:
+    name: "🌊 SonarQube"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v4
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+# ── 5. TRIVY (Image & SBOM) ─────────────────────────────────────────────────
   trivy:
     name: "🐳 Trivy"
+    needs: [gitleaks, gosec, checkov, sonarqube]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -157,22 +173,17 @@ jobs:
           sarif_file: trivy-image-results.sarif
           category: trivy-image
 
-      - name: Trivy — Scan Go dependencies (filesystem)
+      - name: Generate SBOM (spdx-json)
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
-        if: success() || failure()
-        with:
-          scan-type: fs
-          scan-ref: .
-          format: sarif
-          output: trivy-fs-results.sarif
-          severity: CRITICAL,HIGH
-          exit-code: '1'
-          ignore-unfixed: true
-          vuln-type: library
-
-      - name: Upload filesystem scan SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
-          sarif_file: trivy-fs-results.sarif
-          category: trivy-filesystem
+          image-ref: ${{ env.IMAGE }}
+          format: 'spdx-json'
+          output: 'sbom.spdx.json'
+
+      - name: Upload SBOM Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sbom
+          path: sbom.spdx.json
