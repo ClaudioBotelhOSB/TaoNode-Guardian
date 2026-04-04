@@ -28,6 +28,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -55,18 +56,47 @@ const (
 // Analytics and AI fields are nil-safe: the controller operates in
 // reactive-only mode when these are nil (no ClickHouse or Ollama configured).
 //
-// +kubebuilder:rbac:groups=tao.guardian.io,resources=taonodes,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=tao.guardian.io,resources=taonodes/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=tao.guardian.io,resources=taonodes/finalizers,verbs=update
-// +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups="",resources=services;serviceaccounts,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;delete
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch
-// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
-// +kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshots,verbs=get;list;watch;create;delete
-// +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors,verbs=get;list;watch;create;update;patch
+// ══════════════════════════════════════════════════════════════════════
+// RBAC MARKERS — Kubebuilder generates a single ClusterRole from these.
+//
+// IMPORTANT: controller-gen produces ONE aggregated ClusterRole, used for
+// development (`make run`). Production deployments use the hand-crafted,
+// segregated YAML files in config/rbac/ (doc 14, Section 4) applied via
+// ArgoCD. Do NOT rely on controller-gen output for production RBAC.
+// ══════════════════════════════════════════════════════════════════════
+
+// ── CRD Manager (cluster-scoped) ──────────────────────────────────────
+// The Operator observes TaoNodes cluster-wide but NEVER creates or deletes
+// them — those are user-initiated operations.
+//+kubebuilder:rbac:groups=tao.guardian.io,resources=taonodes,verbs=get;list;watch
+//+kubebuilder:rbac:groups=tao.guardian.io,resources=taonodes/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=tao.guardian.io,resources=taonodes/finalizers,verbs=update
+
+// ── Resource Observer (cluster-scoped, read-only) ─────────────────────
+// Nodes are cluster-scoped; read-only access for GPU scheduling labels.
+// Namespaces are read to verify target namespace existence pre-provision.
+//+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
+//+kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,resourceNames=taonode-guardian-workload-manager,verbs=get
+
+// ── Leader Election (namespace: taonode-guardian-system) ──────────────
+// controller-runtime v0.19+ uses Lease-based leader election exclusively.
+//+kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch
+
+// ── Workload Manager (per managed namespace) ──────────────────────────
+// All workload resources are namespaced; Role bindings per namespace limit
+// blast radius if the Operator SA is compromised (doc 14, Section 2).
+//+kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;delete
+//+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch
+//+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+//+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+//+kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshots,verbs=get;list;watch;create;delete
+//+kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=monitoring.coreos.com,resources=prometheusrules,verbs=get;list;watch;create;update;patch;delete
 type TaoNodeReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
@@ -141,6 +171,13 @@ func (r *TaoNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if err := r.ensureHeadlessService(ctx, &tn); err != nil {
 		return ctrl.Result{}, fmt.Errorf("ensure headless Service: %w", err)
 	}
+	// Validate that the workload-manager Role exists in the target namespace
+	// (Option A — doc 14 Section 6). If absent, SRE must apply the Role before
+	// the Operator can provision workloads. Requeues at 60 s instead of erroring.
+	if err := r.validateNamespacePermissions(ctx, &tn); err != nil {
+		return r.updateStatusAndRequeue(ctx, &tn, 60*time.Second)
+	}
+
 	// Validate hotkey Secret existence and compute rotation hash BEFORE building
 	// the StatefulSet so the pod-template annotation is always up-to-date.
 	if err := r.validateHotkeySecret(ctx, &tn); err != nil {
@@ -623,6 +660,57 @@ func (r *TaoNodeReconciler) sendNotifications(
 	}
 }
 
+// validateNamespacePermissions implements Least Privilege RBAC Option A (doc 14, Section 6).
+//
+// Before attempting to provision any workload resource, the Operator checks that
+// the Role "taonode-guardian-workload-manager" exists in the target namespace.
+// If absent, it means the SRE has not applied the per-namespace RBAC manifest yet.
+// The Operator sets NamespaceReady=False with a clear action message and requeues
+// at 60 s — it does NOT self-provision RBAC (that would require privilege escalation).
+//
+// The Role is created once by the SRE using config/rbac/role-workload-manager.yaml.
+// When the Operator runs in envtest or dev mode (make run), the Role must also be
+// present; test suites create it in BeforeEach via k8sClient.Create.
+func (r *TaoNodeReconciler) validateNamespacePermissions(
+	ctx context.Context, tn *taov1alpha1.TaoNode,
+) error {
+	const workloadManagerRole = "taonode-guardian-workload-manager"
+
+	role := &rbacv1.Role{}
+	err := r.Get(ctx, types.NamespacedName{
+		Name:      workloadManagerRole,
+		Namespace: tn.Namespace,
+	}, role)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			msg := fmt.Sprintf("RBAC Role %q not found in namespace %q. "+
+				"SRE action required: apply config/rbac/role-workload-manager.yaml "+
+				"with kubectl -n %s and re-apply the RoleBinding.",
+				workloadManagerRole, tn.Namespace, tn.Namespace)
+			r.setCondition(tn, "NamespaceReady", metav1.ConditionFalse,
+				"InsufficientPermissions", msg)
+			r.Recorder.Eventf(tn, corev1.EventTypeWarning, "NamespaceRBACMissing", "%s", msg)
+			return err
+		}
+		if apierrors.IsForbidden(err) {
+			msg := fmt.Sprintf("Cannot verify RBAC Role %q in namespace %q because the "+
+				"controller ServiceAccount lacks read access to roles.rbac.authorization.k8s.io. "+
+				"Fix the production RBAC bundle before provisioning workloads.",
+				workloadManagerRole, tn.Namespace)
+			r.setCondition(tn, "NamespaceReady", metav1.ConditionFalse,
+				"RBACValidationForbidden", msg)
+			r.Recorder.Eventf(tn, corev1.EventTypeWarning, "NamespaceRBACValidationForbidden", "%s", msg)
+			return err
+		}
+		return fmt.Errorf("check namespace RBAC: %w", err)
+	}
+
+	r.setCondition(tn, "NamespaceReady", metav1.ConditionTrue,
+		"RBACReady",
+		fmt.Sprintf("Workload-manager Role present in namespace %s", tn.Namespace))
+	return nil
+}
+
 // validateHotkeySecret checks that the Secret referenced by spec.validator.hotKeySecret
 // exists in the same namespace and contains the required "hotkey" data key.
 //
@@ -631,7 +719,7 @@ func (r *TaoNodeReconciler) sendNotifications(
 //   - RULE 8:  Operator verifies existence only — never reads key material for use
 //   - RULE 9:  truncated hash (first 8 bytes) is stored in Status for rolling-update detection
 //
-// Returns nil for RoleSubtensor or when no HotKeySecret is configured.
+// Returns nil only for roles that do not require hotkeys.
 func (r *TaoNodeReconciler) validateHotkeySecret(
 	ctx context.Context, tn *taov1alpha1.TaoNode,
 ) error {
@@ -641,15 +729,7 @@ func (r *TaoNodeReconciler) validateHotkeySecret(
 		return nil
 	}
 
-	// RoleMiner: hotkey is OPTIONAL — a miner can run as an unauthenticated
-	// full node. Skip validation entirely when no validator block is configured.
-	if tn.Spec.Role == taov1alpha1.RoleMiner &&
-		(tn.Spec.Validator == nil || tn.Spec.Validator.HotKeySecret == "") {
-		tn.Status.HotkeyHash = ""
-		return nil
-	}
-
-	// RoleValidator: hotkey is REQUIRED — cannot participate in consensus without one.
+	// Validator/miner: hotkey is REQUIRED per doc 13.
 	if tn.Spec.Validator == nil || tn.Spec.Validator.HotKeySecret == "" {
 		tn.Status.HotkeyHash = ""
 		return fmt.Errorf("hotkey secret reference is required for role %s", tn.Spec.Role)

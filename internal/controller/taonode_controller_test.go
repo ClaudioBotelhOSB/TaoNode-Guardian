@@ -26,6 +26,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -75,6 +76,27 @@ var _ = Describe("TaoNodeReconciler", func() {
 		if err != nil && !apierrors.IsAlreadyExists(err) {
 			Expect(err).NotTo(HaveOccurred())
 		}
+
+		// validateNamespacePermissions (doc 14, Option A) checks for this Role
+		// before provisioning any workload. Create it here so all specs pass the
+		// pre-condition check without stubbing the reconciler.
+		workloadRole := &rbacv1.Role{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "taonode-guardian-workload-manager",
+				Namespace: testNamespace,
+			},
+			Rules: []rbacv1.PolicyRule{
+				{
+					APIGroups: []string{"apps"},
+					Resources: []string{"statefulsets"},
+					Verbs:     []string{"get", "list", "watch", "create", "update", "patch", "delete"},
+				},
+			},
+		}
+		err = k8sClient.Create(ctx, workloadRole)
+		if err != nil && !apierrors.IsAlreadyExists(err) {
+			Expect(err).NotTo(HaveOccurred())
+		}
 	})
 
 	// ── Spec builders ─────────────────────────────────────────────────────────
@@ -117,8 +139,8 @@ var _ = Describe("TaoNodeReconciler", func() {
 		tn := newMinerSpec(name)
 		tn.Spec.Role = taov1alpha1.RoleValidator
 		tn.Spec.Validator = &taov1alpha1.ValidatorSpec{
-			// Secret does not need to exist for StatefulSet spec assertions —
-			// no pods are scheduled in envtest.
+			// validateHotkeySecret() performs a real Secret GET during reconcile,
+			// so the placeholder Secret is created in BeforeEach for validator tests.
 			HotKeySecret:            "validator-hotkey-placeholder",
 			SlashingProtection:      true,
 			MaxConcurrentValidators: 1,
