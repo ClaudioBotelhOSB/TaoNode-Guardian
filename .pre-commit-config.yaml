@@ -1,0 +1,35 @@
+# .pre-commit-config.yaml
+#
+# TRAVA LOCAL — Shift-Left Security
+# ─────────────────────────────────
+# Propósito: Bloquear segredos/chaves ANTES que contaminem o histórico .git.
+# Somente o Gitleaks roda aqui. Ferramentas pesadas (Gosec, Checkov, Trivy)
+# ficam no CI para não atrapalhar o fluxo do desenvolvedor.
+#
+# INSTALAÇÃO (uma vez por máquina):
+#   pip install pre-commit
+#   pre-commit install          # Instala o hook em .git/hooks/pre-commit
+#   pre-commit install --hook-type pre-push  # (Opcional) hook de pre-push
+#
+# EXECUÇÃO MANUAL (varrer tudo):
+#   pre-commit run --all-files
+#
+# BYPASS DE EMERGÊNCIA (use com consciência):
+#   git commit --no-verify      # ← O CI ainda vai pegar. Não é uma saída.
+
+default_install_hook_types: [pre-commit]
+
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2                  # Última versão estável — atualize com: pre-commit autoupdate
+    hooks:
+      - id: gitleaks
+        name: "🔑 Gitleaks — Caçador de Chaves e Segredos"
+        description: >
+          Escaneia o diff do commit em busca de chaves de API, tokens,
+          passwords e outros segredos antes de gravar no histórico Git.
+        # Configuração extra: crie um .gitleaks.toml na raiz para
+        # adicionar allowlists (ex: fixtures de teste com chaves fake).
+        args:
+          - "--verbose"           # Mostra qual regra detectou o problema
+          - "--redact"            # Substitui o valor do segredo no log por ***
