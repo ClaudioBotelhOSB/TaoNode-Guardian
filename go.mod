@@ -1,6 +1,6 @@
 module github.com/ClaudioBotelhOSB/taonode-guardian
 
-go 1.23.0
+go 1.24.13
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.23.2
