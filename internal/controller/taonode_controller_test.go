@@ -108,6 +108,10 @@ var _ = Describe("TaoNodeReconciler", func() {
 	//   - miner skips the validator singleton Lease (ensureValidatorSingleton)
 	//   - no Monitoring → ServiceMonitor CRD is not required in envtest
 	//   - no Analytics / AIAdvisor → ClickHouse and Ollama are not required
+	//
+	// spec.validator.hotKeySecret is required by doc 13 (Zero Trust) for both
+	// validators and miners. Tests that use newMinerSpec must create the
+	// "miner-hotkey-placeholder" Secret in their BeforeEach; see Scenario 1.
 	newMinerSpec := func(name string) *taov1alpha1.TaoNode {
 		return &taov1alpha1.TaoNode{
 			ObjectMeta: metav1.ObjectMeta{
@@ -129,6 +133,12 @@ var _ = Describe("TaoNodeReconciler", func() {
 					MaxRestartAttempts:   3,
 					ProbeIntervalSeconds: 30,
 					SyncTimeoutMinutes:   60,
+				},
+				// validateHotkeySecret() requires a non-empty HotKeySecret for miners
+				// (doc 13 Zero Trust contract). The Secret must be created by the
+				// test's BeforeEach before the TaoNode is submitted.
+				Validator: &taov1alpha1.ValidatorSpec{
+					HotKeySecret: "miner-hotkey-placeholder",
 				},
 			},
 		}
@@ -169,6 +179,28 @@ var _ = Describe("TaoNodeReconciler", func() {
 		var tn *taov1alpha1.TaoNode
 
 		BeforeEach(func() {
+			// validateHotkeySecret() performs a real Secret GET during reconcile.
+			// The placeholder Secret must exist before the TaoNode is created so
+			// the reconciler can proceed past Step 4 and create the StatefulSet.
+			minerKeySecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "miner-hotkey-placeholder",
+					Namespace: testNamespace,
+				},
+				Data: map[string][]byte{
+					// 32 zero-bytes satisfy the ">20 bytes" size check in the
+					// key-injector init container and the len() check in the operator.
+					"hotkey": make([]byte, 32),
+				},
+			}
+			err := k8sClient.Create(ctx, minerKeySecret)
+			if err != nil && !apierrors.IsAlreadyExists(err) {
+				Expect(err).NotTo(HaveOccurred())
+			}
+			DeferCleanup(func() {
+				_ = k8sClient.Delete(ctx, minerKeySecret)
+			})
+
 			tn = newMinerSpec("miner-sn1")
 			Expect(k8sClient.Create(ctx, tn)).To(Succeed(),
 				"failed to create TaoNode %s/%s", tn.Namespace, tn.Name)
