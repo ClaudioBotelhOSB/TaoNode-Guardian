@@ -99,7 +99,7 @@ func (c *ollamaClient) generate(ctx context.Context, req OllamaRequest) (OllamaR
 	if err != nil {
 		return OllamaResponse{}, fmt.Errorf("ollama http call: %w", err)
 	}
-	defer httpResp.Body.Close()
+	defer func() { _ = httpResp.Body.Close() }()
 
 	if httpResp.StatusCode != http.StatusOK {
 		errBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, maxErrorBodyBytes))

@@ -132,7 +132,7 @@ func (fc *FinOpsCalculator) FleetCostReportForPeriod(
 	if err != nil {
 		return FleetCostReport{}, fmt.Errorf("fleet cost report query: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	report := FleetCostReport{
 		Period:        period,

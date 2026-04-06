@@ -95,7 +95,7 @@ func (fc *FleetCorrelator) CorrelateFleet(ctx context.Context, network string) (
 	if err != nil {
 		return nil, fmt.Errorf("fleet correlation query: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var anomalies []FleetAnomaly
 	for rows.Next() {

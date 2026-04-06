@@ -131,7 +131,7 @@ func (n *Notifier) Send(ctx context.Context, report *IncidentReport, ic Incident
 	if err != nil {
 		return fmt.Errorf("discord webhook POST: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Discord returns 204 No Content on success.
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
