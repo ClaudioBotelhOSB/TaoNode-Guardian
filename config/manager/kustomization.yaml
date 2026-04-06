@@ -10,4 +10,4 @@ resources:
 images:
 - name: controller
   newName: ghcr.io/claudiobotelhosb/taonode-guardian
-  newTag: latest
+  newTag: v0.1.0

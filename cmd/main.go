@@ -43,6 +43,8 @@ import (
 	"flag"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	// Load kubeconfig auth plugins for GKE (gcp), EKS (aws), AKS (azure).
@@ -295,8 +297,12 @@ func main() {
 // initAnalytics creates the ClickHouse connection, applies the DDL schema, and
 // returns the three analytics-plane components.
 //
+// Credentials are read from the projected Secret volume at /secrets/clickhouse/
+// (keys: endpoint, username, password, database). The volume is optional so the
+// pod starts cleanly when analytics are disabled.
+//
 // Returns (nil, nil, nil) when:
-//   - CLICKHOUSE_ENDPOINT is not set (analytics intentionally disabled), or
+//   - /secrets/clickhouse/endpoint is absent or empty (analytics intentionally disabled), or
 //   - The TCP dial or schema migration fails (operator starts in reactive-only mode
 //     and logs a descriptive error — no panic or os.Exit).
 func initAnalytics() (
@@ -304,17 +310,17 @@ func initAnalytics() (
 	detector *analytics.AnomalyDetector,
 	cb *analytics.CircuitBreaker,
 ) {
-	endpoint := os.Getenv("CLICKHOUSE_ENDPOINT")
+	endpoint := readClickHouseSecret("endpoint", "")
 	if endpoint == "" {
-		setupLog.Info("CLICKHOUSE_ENDPOINT not set — analytics plane disabled (reactive-only mode)")
+		setupLog.Info("ClickHouse endpoint not configured — analytics plane disabled (reactive-only mode)")
 		return nil, nil, nil
 	}
 
 	conn, err := analytics.NewClickHouseConn(analytics.ClickHouseConfig{
 		Endpoint:   endpoint,
-		Username:   getEnvOrDefault("CLICKHOUSE_USERNAME", "default"),
-		Password:   os.Getenv("CLICKHOUSE_PASSWORD"),
-		Database:   getEnvOrDefault("CLICKHOUSE_DATABASE", "taoguardian"),
+		Username:   readClickHouseSecret("username", "default"),
+		Password:   readClickHouseSecret("password", ""),
+		Database:   readClickHouseSecret("database", "taoguardian"),
 		TLSEnabled: os.Getenv("CLICKHOUSE_TLS") == "true",
 	})
 	if err != nil {
@@ -425,4 +431,17 @@ func getEnvOrDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// readClickHouseSecret reads a ClickHouse credential from the projected Secret
+// volume mounted at /secrets/clickhouse/<name>.
+//
+// Returns defaultVal when the file is absent or empty (analytics disabled, dev
+// environment without the Secret). This matches the optional: true on the volume.
+func readClickHouseSecret(name, defaultVal string) string {
+	data, err := os.ReadFile(filepath.Join("/secrets/clickhouse", name))
+	if err != nil || len(strings.TrimSpace(string(data))) == 0 {
+		return defaultVal
+	}
+	return strings.TrimSpace(string(data))
 }

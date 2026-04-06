@@ -20,6 +20,12 @@ spec:
         control-plane: controller-manager
       annotations:
         kubectl.kubernetes.io/default-container: manager
+        # CKV_K8S_43: digest is computed and pinned by CI at release time
+        # via `kustomize edit set image controller=<registry>/<repo>:<tag>@sha256:<digest>`.
+        checkov.io/skip1: "CKV_K8S_43=Image digest is pinned by the CI pipeline at release time"
+        # CKV_K8S_38: controller-manager legitimately requires API server access
+        # to reconcile TaoNode CRDs and validate namespace RBAC.
+        checkov.io/skip2: "CKV_K8S_38=controller-manager requires SA token for API server access"
     spec:
       serviceAccountName: taonode-guardian-controller-manager
       imagePullSecrets:
@@ -36,7 +42,7 @@ spec:
           # Image is overridden by config/manager/kustomization.yaml.
           # Local dev: docker build -t controller:latest .
           image: controller:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
 
           command:
             - /manager
@@ -70,8 +76,9 @@ spec:
                   fieldPath: metadata.name
 
             # ── Analytics plane — ClickHouse ────────────────────────────────
-            # Feature-gated: the analytics BatchWriter + AnomalyDetector are only
-            # initialized when CLICKHOUSE_ENDPOINT is non-empty (see initAnalytics()).
+            # Feature-gated: analytics is enabled when /secrets/clickhouse/endpoint
+            # is non-empty (see initAnalytics()). Credentials are read from the
+            # clickhouse-creds volume below (CKV_K8S_35: secrets as files, not env vars).
             # Create the Secret manually:
             #   kubectl create secret generic taonode-guardian-clickhouse \
             #     --from-literal=endpoint=clickhouse://ch-host:9000 \
@@ -79,30 +86,6 @@ spec:
             #     --from-literal=password='' \
             #     --from-literal=database=taonode_guardian \
             #     -n taonode-guardian-system
-            - name: CLICKHOUSE_ENDPOINT
-              valueFrom:
-                secretKeyRef:
-                  name: taonode-guardian-clickhouse
-                  key: endpoint
-                  optional: true
-            - name: CLICKHOUSE_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: taonode-guardian-clickhouse
-                  key: username
-                  optional: true
-            - name: CLICKHOUSE_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: taonode-guardian-clickhouse
-                  key: password
-                  optional: true
-            - name: CLICKHOUSE_DATABASE
-              valueFrom:
-                secretKeyRef:
-                  name: taonode-guardian-clickhouse
-                  key: database
-                  optional: true
             - name: CLICKHOUSE_TLS
               value: "false"
 
@@ -151,6 +134,8 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
+            runAsUser: 65532
+            runAsGroup: 65532
             capabilities:
               drop:
                 - ALL
@@ -161,9 +146,19 @@ spec:
             - name: webhook-certs
               mountPath: /tmp/k8s-webhook-server/serving-certs
               readOnly: true
+            # ClickHouse credentials mounted as files (CKV_K8S_35).
+            # initAnalytics() reads /secrets/clickhouse/{endpoint,username,password,database}.
+            # Optional: pod starts cleanly when analytics are disabled.
+            - name: clickhouse-creds
+              mountPath: /secrets/clickhouse
+              readOnly: true
 
       volumes:
         - name: webhook-certs
           secret:
             secretName: taonode-guardian-webhook-server-cert
+            optional: true
+        - name: clickhouse-creds
+          secret:
+            secretName: taonode-guardian-clickhouse
             optional: true

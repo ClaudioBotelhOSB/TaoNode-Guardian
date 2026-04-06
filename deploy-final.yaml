@@ -1301,6 +1301,8 @@ spec:
     metadata:
       annotations:
         kubectl.kubernetes.io/default-container: manager
+        checkov.io/skip1: "CKV_K8S_43=Image digest is pinned by the CI pipeline at release time"
+        checkov.io/skip2: "CKV_K8S_38=controller-manager requires SA token for API server access"
       labels:
         app.kubernetes.io/name: taonode-guardian
         control-plane: controller-manager
@@ -1319,30 +1321,6 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
-        - name: CLICKHOUSE_ENDPOINT
-          valueFrom:
-            secretKeyRef:
-              key: endpoint
-              name: taonode-guardian-clickhouse
-              optional: true
-        - name: CLICKHOUSE_USERNAME
-          valueFrom:
-            secretKeyRef:
-              key: username
-              name: taonode-guardian-clickhouse
-              optional: true
-        - name: CLICKHOUSE_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              key: password
-              name: taonode-guardian-clickhouse
-              optional: true
-        - name: CLICKHOUSE_DATABASE
-          valueFrom:
-            secretKeyRef:
-              key: database
-              name: taonode-guardian-clickhouse
-              optional: true
         - name: CLICKHOUSE_TLS
           value: "false"
         - name: OLLAMA_ENDPOINT
@@ -1353,8 +1331,8 @@ spec:
           value: ghcr.io/opentensor/subtensor:latest
         - name: DR_INTERVAL
           value: 1h
-        image: ghcr.io/claudiobotelhosb/taonode-guardian:latest
-        imagePullPolicy: IfNotPresent
+        image: ghcr.io/claudiobotelhosb/taonode-guardian:v0.1.0
+        imagePullPolicy: Always
         livenessProbe:
           failureThreshold: 3
           httpGet:
@@ -1395,9 +1373,14 @@ spec:
             drop:
             - ALL
           readOnlyRootFilesystem: true
+          runAsGroup: 65532
+          runAsUser: 65532
         volumeMounts:
         - mountPath: /tmp/k8s-webhook-server/serving-certs
           name: webhook-certs
+          readOnly: true
+        - mountPath: /secrets/clickhouse
+          name: clickhouse-creds
           readOnly: true
       imagePullSecrets:
       - name: ghcr-login-secret
@@ -1412,3 +1395,7 @@ spec:
         secret:
           optional: true
           secretName: taonode-guardian-webhook-server-cert
+      - name: clickhouse-creds
+        secret:
+          optional: true
+          secretName: taonode-guardian-clickhouse
