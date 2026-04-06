@@ -13,7 +13,7 @@ permissions:
 env:
   IMAGE: ghcr.io/claudiobotelhosb/taonode-guardian
   PROBE_IMAGE: ghcr.io/claudiobotelhosb/taonode-guardian-probe
-  GO_VERSION: '1.23.0'
+  GO_VERSION: '1.24.13'
 
 jobs:
   # ── 1. BINARY RELEASE — GoReleaser builds binaries, archives, and changelog ─

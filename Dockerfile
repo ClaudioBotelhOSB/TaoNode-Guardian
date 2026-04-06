@@ -1,6 +1,6 @@
 # Dockerfile
 # Build stage — single-platform linux/amd64
-FROM golang:1.23-alpine AS builder
+FROM golang:1.24.13-alpine AS builder
 RUN apk add --no-cache git ca-certificates
 WORKDIR /workspace
 
